@@ -17,6 +17,7 @@ pub fn run() {
             let _ = app;
         }))
         .plugin(
+            // release 默认目标已含 LogDir（AppData/logs），不要再显式追加，否则双写
             tauri_plugin_log::Builder::default()
                 .level(log::LevelFilter::Info)
                 .build(),
@@ -25,6 +26,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -91,8 +93,18 @@ pub fn run() {
             commands::open_settings_window,
             commands::open_history_window,
         ])
-        .run(tauri::generate_context!())
-        .expect("capshot run failed");
+        .build(tauri::generate_context!())
+        .expect("capshot build failed")
+        .run(|_app, event| {
+            // 托盘常驻：最后一个窗口关闭会触发无 code 的 ExitRequested（runtime-wry 的
+            // all-windows-destroyed 逻辑），必须拦截；托盘「退出」走 app.exit(0) 带 code，放行。
+            if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
+                log::info!("run: ExitRequested code={code:?}");
+                if code.is_none() {
+                    api.prevent_exit();
+                }
+            }
+        });
 }
 
 use tauri::tray::TrayIconBuilder;
@@ -122,8 +134,14 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
-            use tauri::tray::TrayIconEvent;
-            if let TrayIconEvent::Click { .. } = event {
+            use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
+            // 按下与松开各发一次 Click —— 只认左键松开，否则一次点击触发两个会话
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
                 commands::trigger_capture(&tray.app_handle().clone());
             }
         })

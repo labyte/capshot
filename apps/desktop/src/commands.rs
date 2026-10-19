@@ -19,7 +19,9 @@ use crate::windows;
 pub fn trigger_capture(app: &AppHandle) {
     let state = app.state::<AppState>();
     // 去抖：500ms 内重复触发 → 聚焦已有 overlay（requestId 幂等原理）
-    if let Some((token, since)) = *state.active.lock().unwrap() {
+    // 先拷贝出快照再判断，避免 if-let 条件守卫占住 active 锁
+    let active_snapshot = *state.active.lock().unwrap();
+    if let Some((token, since)) = active_snapshot {
         if since.elapsed() < Duration::from_millis(500) {
             let overlays: Vec<String> = state
                 .sessions
@@ -35,61 +37,89 @@ pub fn trigger_capture(app: &AppHandle) {
                         let _ = w.set_focus();
                     }
                 }
-                return;
             }
+            // 会话尚未落库（工作线程抓取中）也视为进行中：吞掉重复触发，
+            // 否则按下/松开各起一个 overlay，两层冻结帧错位
+            return;
         }
     }
 
     let token = state.next_id();
-    let t0 = Instant::now();
-    let monitors = match state.backend.monitors() {
-        Ok(m) => m,
-        Err(e) => {
-            report_capture_error(app, &e);
-            return;
-        }
-    };
-    let windows = match state.backend.list_windows() {
-        Ok(w) => w,
-        Err(e) => {
-            report_capture_error(app, &e);
-            return;
-        }
-    };
-    let mut frames = std::collections::HashMap::new();
-    let mut pngs = std::collections::HashMap::new();
-    for m in &monitors {
-        match state.backend.capture_monitor(m.id) {
-            Ok(f) => {
-                let png = capture_core::encode::to_png(&f).unwrap_or_default();
-                frames.insert(m.id, f);
-                pngs.insert(m.id, png);
-            }
+    *state.active.lock().unwrap() = Some((token, Instant::now()));
+
+    // 抓屏 + PNG 编码是重活（debug 下可达秒级），必须离开主线程，否则事件循环
+    // 停摆 → WebView2 挂起（WER AppHangB1）、Esc/托盘/后续命令全部无响应。
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        let state = app2.state::<AppState>();
+        let t0 = Instant::now();
+        let monitors = match state.backend.monitors() {
+            Ok(m) => m,
             Err(e) => {
-                log::error!("capture screen frame failed monitor={} err={e}", m.id);
-                report_capture_error(app, &e);
+                report_capture_error(&app2, &e);
                 return;
             }
+        };
+        let windows = match state.backend.list_windows() {
+            Ok(w) => w,
+            Err(e) => {
+                report_capture_error(&app2, &e);
+                return;
+            }
+        };
+        let mut frames = std::collections::HashMap::new();
+        let mut pngs = std::collections::HashMap::new();
+        for m in &monitors {
+            match state.backend.capture_monitor(m.id) {
+                Ok(f) => {
+                    let png = capture_core::encode::to_png(&f).unwrap_or_default();
+                    frames.insert(m.id, f);
+                    pngs.insert(m.id, png);
+                }
+                Err(e) => {
+                    log::error!("capture screen frame failed monitor={} err={e}", m.id);
+                    report_capture_error(&app2, &e);
+                    return;
+                }
+            }
         }
-    }
-    log::info!("capture target request_id={token} (elapsed {:?}ms)", t0.elapsed().as_millis());
+        log::info!("capture target request_id={token} (elapsed {:?}ms)", t0.elapsed().as_millis());
 
-    let mut overlays = Vec::new();
-    for (i, m) in monitors.iter().enumerate() {
-        match windows::open_overlay(app, token, i, m) {
-            Ok(label) => overlays.push(label),
-            Err(e) => log::error!("open overlay failed: {e}"),
-        }
-    }
-    state.put_session(Session {
-        token,
-        monitors: monitors.clone(),
-        windows,
-        frames,
-        pngs,
-        overlays,
+        // 窗口创建回主线程（macOS 要求；Windows 亦可），overlay 立即可见
+        let app3 = app2.clone();
+        let _ = app2.run_on_main_thread(move || {
+            let state = app3.state::<AppState>();
+            let mut overlays = Vec::new();
+            for (i, m) in monitors.iter().enumerate() {
+                match windows::open_overlay(&app3, token, i, m) {
+                    Ok(label) => overlays.push(label),
+                    Err(e) => log::error!("open overlay failed: {e}"),
+                }
+            }
+            state.put_session(Session {
+                token,
+                monitors,
+                windows,
+                frames,
+                pngs,
+                overlays: overlays.clone(),
+            });
+            // 兜底：前端就绪信号丢失（webview 异常）时 1.2s 后强制显示，避免隐形窗口
+            let app4 = app3.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(1200));
+                for l in &overlays {
+                    if let Some(w) = app4.get_webview_window(l) {
+                        if !w.is_visible().unwrap_or(true) {
+                            log::warn!("overlay {l} not shown by frontend within 1.2s — forcing visible");
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                        }
+                    }
+                }
+            });
+        });
     });
-    *state.active.lock().unwrap() = Some((token, Instant::now()));
 }
 
 fn report_capture_error(app: &AppHandle, e: &CaptureError) {
@@ -168,7 +198,7 @@ pub fn get_monitor_frame(token: u64, monitor: u64, state: State<'_, AppState>) -
 
 /// 提交选区：在缓存冻结帧上裁剪（所见即所得，无二次抓屏竞态），跨屏则合成。
 #[tauri::command]
-pub fn commit_selection(token: u64, rect: PhysicalRect, source: String, app_hint: Option<String>, state: State<'_, AppState>) -> Result<serde_json::Value, ApiError> {
+pub async fn commit_selection(token: u64, rect: PhysicalRect, source: String, app_hint: Option<String>, state: State<'_, AppState>) -> Result<serde_json::Value, ApiError> {
     let frame = {
         let g = state.sessions.lock().unwrap();
         let s = g.iter().find(|s| s.token == token).ok_or(ApiError { code: "target_not_found", message: "expired".into() })?;
@@ -218,7 +248,7 @@ fn compose_rect(s: &Session, rect: &PhysicalRect) -> Result<Frame, ApiError> {
 
 /// 双击吸附整窗：两级抓取（窗口图 → too-small 用缓存帧裁剪兜底，复刻参考链与日志字面）。
 #[tauri::command]
-pub fn capture_window_clean(token: u64, window_id: u64, state: State<'_, AppState>) -> Result<serde_json::Value, ApiError> {
+pub async fn capture_window_clean(token: u64, window_id: u64, state: State<'_, AppState>) -> Result<serde_json::Value, ApiError> {
     let (rect, frame) = {
         let g = state.sessions.lock().unwrap();
         let s = g.iter().find(|s| s.token == token).ok_or(ApiError { code: "target_not_found", message: "expired".into() })?;
@@ -263,7 +293,8 @@ pub struct ExportReq {
 }
 
 #[tauri::command]
-pub fn export_result(app: AppHandle, req: ExportReq, state: State<'_, AppState>) -> Result<serde_json::Value, ApiError> {
+pub async fn export_result(app: AppHandle, req: ExportReq, state: State<'_, AppState>) -> Result<serde_json::Value, ApiError> {
+    log::info!("export_result enter op={} sel={}", req.op, req.sel);
     let sel = {
         let mut g = state.selections.lock().unwrap();
         let s = g.get_mut(&req.sel).ok_or(ApiError { code: "target_not_found", message: "sel gone".into() })?;
@@ -306,12 +337,24 @@ pub fn export_result(app: AppHandle, req: ExportReq, state: State<'_, AppState>)
             h.png_path(id).unwrap_or_default()
         };
         result["path"] = serde_json::json!(path.display().to_string());
+        // 保存成功的可见反馈（此前"存图无效"实为静默成功）
+        use tauri_plugin_notification::NotificationExt;
+        if let Err(e) = app
+            .notification()
+            .builder()
+            .title("capshot 已保存")
+            .body(path.display().to_string())
+            .show()
+        {
+            log::warn!("save notification failed: {e}");
+        }
     }
     if req.op == "pin" {
         let _ = windows::open_pin(&app, req.sel, &sel.rect);
     }
     // 关闭本会话 overlays
     close_session_overlays(&app, &state);
+    log::info!("export_result done op={} id={}", req.op, result["id"]);
     Ok(result)
 }
 
@@ -338,7 +381,8 @@ pub fn get_selection_png(sel: u64, state: State<'_, AppState>) -> Result<tauri::
 }
 
 #[tauri::command]
-pub fn cancel_capture(token: u64, app: AppHandle, state: State<'_, AppState>) {
+pub async fn cancel_capture(token: u64, app: AppHandle, state: State<'_, AppState>) -> Result<(), ApiError> {
+    log::info!("cancel_capture enter token={token}");
     let overlays: Vec<String> = {
         let mut g = state.sessions.lock().unwrap();
         if let Some(pos) = g.iter().position(|s| s.token == token) {
@@ -352,11 +396,18 @@ pub fn cancel_capture(token: u64, app: AppHandle, state: State<'_, AppState>) {
             let _ = w.close();
         }
     }
-    if let Some((active, _)) = *state.active.lock().unwrap() {
-        if active == token {
-            *state.active.lock().unwrap() = None;
-        }
+    log::info!("cancel_capture exit token={token}");
+    // 注意：`if let Some(..) = *lock()` 的守卫会存活到块结束，体内再 lock() 即自死锁
+    let should_clear = state
+        .active
+        .lock()
+        .unwrap()
+        .map(|(a, _)| a == token)
+        .unwrap_or(false);
+    if should_clear {
+        *state.active.lock().unwrap() = None;
     }
+    Ok(())
 }
 
 fn close_session_overlays(app: &AppHandle, state: &AppState) {
@@ -506,15 +557,17 @@ pub fn set_settings(app: AppHandle, patch: SettingsPatch, state: State<'_, AppSt
 /// 钉图窗口当前物理几何（前端缩放锚点用）。
 #[tauri::command]
 pub fn pin_bounds(window: tauri::Window) -> Result<serde_json::Value, ApiError> {
-    let pos = window.outer_position().map_err(|e| ApiError { code: "platform_error", message: e.to_string() })?;
-    let size = window.outer_size().map_err(|e| ApiError { code: "platform_error", message: e.to_string() })?;
+    // 用 inner（客户区）几何：钉图带阴影时 outer 比图像实际位置偏 8px，
+    // 光标锚定缩放会错位
+    let pos = window.inner_position().map_err(|e| ApiError { code: "platform_error", message: e.to_string() })?;
+    let size = window.inner_size().map_err(|e| ApiError { code: "platform_error", message: e.to_string() })?;
     let scale = window.scale_factor().unwrap_or(1.0);
     Ok(serde_json::json!({ "x": pos.x, "y": pos.y, "width": size.width, "height": size.height, "scale": scale }))
 }
 
 /// 历史 → 剪贴板。
 #[tauri::command]
-pub fn history_copy(id: i64, state: State<'_, AppState>) -> Result<(), ApiError> {
+pub async fn history_copy(id: i64, state: State<'_, AppState>) -> Result<(), ApiError> {
     let path = state.history.lock().unwrap().png_path(id).ok_or(ApiError { code: "target_not_found", message: "missing".into() })?;
     let png = std::fs::read(path).map_err(|e| ApiError { code: "save_failed", message: e.to_string() })?;
     let frame = history::png_to_frame(&png).ok_or(ApiError { code: "degenerate_geometry", message: "decode".into() })?;
@@ -524,7 +577,7 @@ pub fn history_copy(id: i64, state: State<'_, AppState>) -> Result<(), ApiError>
 
 /// 历史 → 新钉图。
 #[tauri::command]
-pub fn history_pin(app: AppHandle, id: i64, state: State<'_, AppState>) -> Result<(), ApiError> {
+pub async fn history_pin(app: AppHandle, id: i64, state: State<'_, AppState>) -> Result<(), ApiError> {
     let path = state.history.lock().unwrap().png_path(id).ok_or(ApiError { code: "target_not_found", message: "missing".into() })?;
     let png = std::fs::read(path).map_err(|e| ApiError { code: "save_failed", message: e.to_string() })?;
     let frame = history::png_to_frame(&png).ok_or(ApiError { code: "degenerate_geometry", message: "decode".into() })?;

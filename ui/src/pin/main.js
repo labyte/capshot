@@ -35,24 +35,30 @@ window.addEventListener("wheel", async (e) => {
   $("zoomLabel").textContent = Math.round(w / (boot?.width || w) * 100) + "%";
 }, { passive: false });
 
-// 拖动移动（img 区域按住左键）
-let drag = null;
-img.addEventListener("pointerdown", async (e) => {
+// 拖动：位移超阈值后交给系统原生拖拽循环（零 IPC、跟手不卡顿）；
+// 未移动的点击与双击不受影响（双击关闭仍由 dblclick 处理）
+img.addEventListener("pointerdown", (e) => {
   if (e.button !== 0) return;
-  const g = await ensureGeom();
-  drag = { sx: e.clientX * g.scale, sy: e.clientY * g.scale, gx: g.x, gy: g.y, scale: g.scale };
-  img.setPointerCapture(e.pointerId);
+  const start = { x: e.clientX, y: e.clientY };
+  const win = window.__TAURI__.window.getCurrentWindow();
+  const stop = () => {
+    img.removeEventListener("pointermove", onMove);
+    img.removeEventListener("pointerup", stop);
+    img.removeEventListener("pointercancel", stop);
+  };
+  const onMove = (ev) => {
+    if (Math.abs(ev.clientX - start.x) + Math.abs(ev.clientY - start.y) > 4) {
+      stop();
+      geom = null; // 原生拖拽改变了窗口几何，下次缩放前重新取
+      win.startDragging().catch(() => {});
+    }
+  };
+  img.addEventListener("pointermove", onMove);
+  img.addEventListener("pointerup", stop);
+  img.addEventListener("pointercancel", stop);
 });
-img.addEventListener("pointermove", (e) => {
-  if (!drag) return;
-  const x = Math.round(drag.gx + (e.clientX * drag.scale - drag.sx));
-  const y = Math.round(drag.gy + (e.clientY * drag.scale - drag.sy));
-  invoke("pin_move", { x, y, w: geom.width, h: geom.height });
-  geom.x = x; geom.y = y;
+img.addEventListener("dblclick", () => {
+  try { window.__TAURI__.window.getCurrentWindow().close(); } catch {}
 });
-img.addEventListener("pointerup", () => { drag = null; });
-img.addEventListener("dblclick", () => close());
 
 alpha.addEventListener("input", () => { img.style.opacity = alpha.value / 100; });
-$("close").addEventListener("click", () => close());
-function close() { try { window.__TAURI__.window.getCurrentWindow().close(); } catch {} }

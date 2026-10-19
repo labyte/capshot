@@ -16,10 +16,26 @@ pub fn open_overlay(app: &AppHandle, token: u64, idx: usize, m: &MonitorInfo) ->
         .minimizable(false)
         .closable(false)
         .visible(false)
-        .transparent(false)
+        .transparent(true)
+        // 关键：无边框窗默认 shadow(true) 会带 8px 不可见 resize 边框，
+        // 导致 client 区域相对屏幕偏移 (8,1) —— 冻结帧整幅错位。overlay 必须关阴影。
+        .shadow(false)
         .focused(true)
         .inner_size(200.0, 200.0)
         .build()?;
+    // 禁用 DWM 窗口开合动画：否则 show() 带 ~200ms 淡入缩放，"覆盖感"明显
+    #[cfg(windows)]
+    if let Ok(hwnd) = win.hwnd() {
+        unsafe {
+            let on: i32 = 1;
+            let _ = windows::Win32::Graphics::Dwm::DwmSetWindowAttribute(
+                hwnd,
+                windows::Win32::Graphics::Dwm::DWMWA_TRANSITIONS_FORCEDISABLED,
+                &on as *const _ as *const core::ffi::c_void,
+                4,
+            );
+        }
+    }
     // 物理坐标落位（builder 只吃逻辑，创建后立刻改物理）
     let _ = win.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
         x: m.bounds.x,
@@ -29,8 +45,8 @@ pub fn open_overlay(app: &AppHandle, token: u64, idx: usize, m: &MonitorInfo) ->
         width: m.bounds.width,
         height: m.bounds.height,
     }));
-    let _ = win.show();
-    let _ = win.set_focus();
+    // 保持隐藏 —— 前端画完冻结帧第一帧后才 show（overlay/main.js init 末尾），
+    // 避免用户看到深色空窗→画面的过渡（"多了一层"感）。兜底强显见 commands.rs。
     Ok(label)
 }
 

@@ -25,6 +25,7 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-log = "2"
+tauri-plugin-notification = "2"
 capture-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -40,3 +41,4 @@ capture-macos = { path = "../../crates/capture-macos" }
 
 [target.'cfg(windows)'.dependencies]
 capture-windows = { path = "../../crates/capture-windows" }
+windows = { version = "0.62", features = ["Win32_Graphics_Dwm"] }

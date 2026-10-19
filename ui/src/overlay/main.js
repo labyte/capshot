@@ -3,7 +3,9 @@
 import { invoke, u8ToB64 } from "../shared.js";
 
 const $ = (id) => document.getElementById(id);
-const view = $("view"), ctx = view.getContext("2d", { alpha: false });
+// alpha 画布：帧未画好前画布透明 → 透出真实屏幕；画好后不透明冻结帧覆盖。
+// 免去 visibility 切换，消除"先黑/先透再画面"的闪烁
+const view = $("view"), ctx = view.getContext("2d");
 const magEl = $("magnifier"), magCv = $("mag"), magCtx = magCv.getContext("2d"), magInfo = $("magInfo");
 const toolbar = $("toolbar"), flash = $("flash"), textInput = $("textInput"), textValue = $("textValue");
 
@@ -36,6 +38,16 @@ const HANDLE_R = () => 6 * scale;
   buildMosaic();
   buildToolbar();
   render();
+  // 透明窗 + 画布就绪前不可见：帧数据到位前一帧都不盖任何东西，
+  // 显示瞬间即完整冻结帧，无空窗/无淡入（DWM 过渡已在 Rust 侧禁用）
+  const win = window.__TAURI__.window.getCurrentWindow();
+  if (bm) {
+    await win.show();
+    await win.setFocus();
+  } else {
+    try { await invoke("cancel_capture", { token: boot.token }); } catch {}
+    try { await win.close(); } catch {}
+  }
 })();
 
 function buildMosaic() {
@@ -177,11 +189,10 @@ view.addEventListener("pointerdown", (e) => {
     if (h) { anchor = { mode: "resize", handle: h, rect0: { ...rect }, start: p }; return; }
     if (inRect(p)) { anchor = { mode: "move", rect0: { ...rect }, start: p }; return; }
   }
-  // 新框选（idle 或 edit 中重画）
-  const src = hover && mode !== "edit" ? { ...hover } : null;
-  rect = src ? { x: src.x, y: src.y, w: 0, h: 0 } : { x: p.x, y: p.y, w: 0, h: 0 };
-  if (!src) rect = { x: p.x, y: p.y, w: 1, h: 1 };
-  anchor = { mode: "draw", start: src ? { x: src.x, y: src.y } : p };
+  // 新框选（idle 或 edit 中重画）：始终从光标处起拖 —— 自由框选；
+  // 未拖动即松手（<4px）时由 pointerup 按“点击吸附窗口”处理
+  rect = { x: p.x, y: p.y, w: 1, h: 1 };
+  anchor = { mode: "draw", start: p };
   shapes = []; sel = null;
   mode = "draw"; render();
 });
@@ -273,7 +284,6 @@ async function commitSel() {
 async function finish(op) {
   if (!sel) await commitSel();
   if (!sel) return;
-  doFlash();
   const req = { sel, op };
   if (shapes.length) {
     const png = await renderFinalPng();

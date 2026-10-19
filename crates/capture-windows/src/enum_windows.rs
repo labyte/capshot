@@ -13,16 +13,19 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetClassNameW, GetWindowLongW, GetWindowTextW, GetWindowThreadProcessId,
-    IsWindowVisible, GWL_EXSTYLE, WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    IsIconic, IsWindowVisible, GWL_EXSTYLE, WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST,
 };
 
-pub const WINDOWS_SHELL_CLASSES: [&str; 6] = [
+pub const WINDOWS_SHELL_CLASSES: [&str; 7] = [
     "Shell_TrayWnd",
     "Shell_SecondaryTrayWnd",
     "Windows.UI.Core.CoreWindow",
     "XamlExplorerHostIslandWindow",
     "NotifyIconOverflowWindow",
     "TaskListThumbnailWnd",
+    // CEF 离屏渲染面（NVIDIA GeForce Overlay 等），非用户内容窗口
+    "CEF-OSC-WIDGET",
 ];
 pub const DESKTOP_CLASSES: [&str; 2] = ["Progman", "WorkerW"];
 
@@ -119,7 +122,9 @@ pub fn list_windows(exclude: &[HWND]) -> Vec<WindowInfo> {
             bounds,
             z_index: z,
             layer: if ex & WS_EX_TOPMOST.0 != 0 { 0 } else { 5 },
-            is_on_screen: !cloaked,
+            // 最小化窗口仍 IsWindowVisible 且非 cloaked，但 bounds 停在 (-32000,-32000)
+            // 的 146×21 小条 —— 必须按 iconic 剔除，否则污染吸附候选
+            is_on_screen: !cloaked && !IsIconic(hwnd).as_bool(),
             cloaked,
             kind,
         });

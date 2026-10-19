@@ -5,6 +5,7 @@ header{display:flex;align-items:center;gap:12px;padding:12px 0}
 h1{font-size:16px;font-weight:600}
 h2{font-size:13px;margin:10px 0 6px;color:#9aa4b2}
 section{border-top:1px solid #232733;padding:6px 0}
+body.overlay{background:transparent}
 canvas#view{position:fixed;inset:0;width:100%;height:100%;cursor:crosshair}
 .hidden{display:none!important}
 #magnifier{position:fixed;width:180px;background:#1c2029;border:1px solid #3a4150;border-radius:6px;padding:6px;pointer-events:none;z-index:30}

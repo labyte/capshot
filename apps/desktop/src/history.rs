@@ -79,8 +79,12 @@ impl HistoryStore {
         let png_path = self.root.join(&png_rel);
         let thumb_path = self.root.join(&thumb_rel);
         std::fs::create_dir_all(png_path.parent().unwrap()).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(thumb_path.parent().unwrap()).map_err(|e| e.to_string())?;
         std::fs::write(&png_path, png).map_err(|e| e.to_string())?;
-        std::fs::write(&thumb_path, thumb).map_err(|e| e.to_string())?;
+        // 缩略图失败不致命：主图与 DB 行才是历史的本体
+        if let Err(e) = std::fs::write(&thumb_path, thumb) {
+            log::warn!("thumbnail write failed: {e}");
+        }
         self.conn.execute(
             "INSERT INTO captures(created_at,x,y,width,height,png_rel,thumb_rel,source,app_hint,annotation_json)
              VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
