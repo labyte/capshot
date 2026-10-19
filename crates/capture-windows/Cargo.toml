@@ -1,0 +1,40 @@
+[package]
+name = "capture-windows"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "capshot Windows 截图后端：EnumWindows+DWM bounds/cloaked，WGC 主路径 + BitBlt 回退"
+
+[dependencies]
+capture-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_HiDpi",
+    "Win32_Storage_Xps",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+    "Graphics_Capture",
+    "Graphics_DirectX",
+    "Graphics_DirectX_Direct3D11",
+    "Foundation",
+    "Foundation_Collections",
+    "Win32_System_Com",
+    "Win32_System_WinRT",
+    "Win32_System_WinRT_Direct3D11",
+    "Win32_System_WinRT_Graphics_Capture",
+    "UI",
+] }
+
+[[example]]
+name = "probe"

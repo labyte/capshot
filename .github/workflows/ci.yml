@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Unit tests
+        run: cargo test --workspace
+      - name: Release build (incl. desktop, MSVC/Xcode native)
+        run: cargo build --release --workspace --examples --features desktop/custom-protocol
+      - name: Clippy (report only)
+        continue-on-error: true
+        run: cargo clippy --workspace --all-targets

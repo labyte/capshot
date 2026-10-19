@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p desktop --bin capshot --features custom-protocol
+      - run: cargo build --release -p capture-windows --example probe
+      - name: Package
+        shell: pwsh
+        run: |
+          mkdir pkg
+          Copy-Item target/release/capshot.exe pkg/
+          Copy-Item target/x86_64-pc-windows-gnu/release/examples/probe.exe pkg/probe.exe -ErrorAction SilentlyContinue
+          if (-not (Test-Path pkg/probe.exe)) { Copy-Item target/release/examples/probe.exe pkg/ }
+          Copy-Item tools/win-x64/WebView2Loader.dll pkg/
+          Copy-Item docs/testing-windows.md pkg/README-test.md
+          Compress-Archive -Path pkg/* -DestinationPath capshot-win-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: capshot-win-x64
+          path: capshot-win-x64.zip
+
+  build-macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p desktop --bin capshot --features custom-protocol
+      - run: cargo build --release -p capture-macos --example probe
+      - name: Bundle .app + zip
+        run: |
+          chmod +x scripts/make-app.sh
+          ./scripts/make-app.sh target/release/capshot dist/capshot.app
+          cp target/release/examples/probe dist/probe
+          zip -r capshot-macos-arm64.zip dist/capshot.app dist/probe docs/testing-windows.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: capshot-macos-arm64
+          path: capshot-macos-arm64.zip
+
+  release:
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "capshot-*"
+          merge-multiple: true
+      - name: Create Release
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            capshot-win-x64.zip capshot-macos-arm64.zip \
+            --title "capshot ${GITHUB_REF_NAME}" \
+            --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

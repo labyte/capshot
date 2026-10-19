@@ -1,0 +1,11 @@
+[package]
+name = "capture-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "capshot 截图核心：平台无关的类型契约、窗口过滤/吸附纯逻辑、几何与编码（原理移植自千问 AppShotCaptureController 逆向结论）"
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+image.workspace = true

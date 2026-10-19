@@ -1,0 +1,20 @@
+[package]
+name = "capture-macos"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "capshot macOS 截图后端：CGWindowListCopyWindowInfo + CGWindowListCreateImage（行为与已验证参考实现一致）"
+
+[dependencies]
+capture-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = "0.24"
+core-foundation = "0.10"
+core-foundation-sys = "0.8"
+libc = "0.2"
+
+[[example]]
+name = "probe"

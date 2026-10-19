@@ -1,0 +1,42 @@
+[package]
+name = "desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "capshot 桌面宿主：Tauri v2 托盘/热键/overlay/钉图/历史/设置"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
+[[bin]]
+name = "capshot"
+path = "src/main.rs"
+
+[lib]
+name = "desktop"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-log = "2"
+capture-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+arboard = "3"
+rusqlite = { version = "0.32", features = ["bundled"] }
+base64 = "0.22"
+log = "0.4"
+image.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+capture-macos = { path = "../../crates/capture-macos" }
+
+[target.'cfg(windows)'.dependencies]
+capture-windows = { path = "../../crates/capture-windows" }
