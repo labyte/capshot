@@ -18,6 +18,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: MSVC dev environment
         uses: ilammy/msvc-dev-cmd@v1
+      - name: Locate rc.exe (embed-resource checks $RC first)
+        shell: pwsh
+        run: |
+          $rc = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter rc.exe |
+                Where-Object { $_.FullName -match '\\x64\\rc\.exe$' } |
+                Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $rc) { Write-Error "rc.exe not found"; exit 1 }
+          "RC=$($rc.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "using RC=$($rc.FullName)"
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release -p desktop --bin capshot --features custom-protocol
       - run: cargo build --release -p capture-windows --example probe
