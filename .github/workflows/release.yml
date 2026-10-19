@@ -16,6 +16,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: MSVC dev environment
+        uses: ilammy/msvc-dev-cmd@v1
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release -p desktop --bin capshot --features custom-protocol
       - run: cargo build --release -p capture-windows --example probe
