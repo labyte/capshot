@@ -28,12 +28,15 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_notification::init())
         .plugin(
+            // 单一 handler 按「哪把键触发」分派。比对的是解析后的 Shortcut，
+            // 不是字符串 —— Display 形是大写规范名，与用户存的原始写法对不上。
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
+                .with_handler(|app, shortcut, event| {
                     use tauri_plugin_global_shortcut::ShortcutState;
-                    if event.state() == ShortcutState::Pressed {
-                        commands::trigger_capture(app);
+                    if event.state() != ShortcutState::Pressed {
+                        return;
                     }
+                    commands::dispatch_shortcut(app, shortcut);
                 })
                 .build(),
         )
@@ -59,10 +62,9 @@ pub fn run() {
                 capture_windows::WindowsBackend::new().ok_or("windows backend unavailable")?,
             );
 
-            let hotkey = settings.hotkey.clone();
             app.manage(AppState::new(backend, settings, settings_path, store));
-            *app.state::<AppState>().current_shortcut.lock().unwrap() = Some(hotkey.clone());
-            if let Err(e) = app.global_shortcut().register(hotkey.as_str()) {
+            // 四槽快捷键一次注册；失败不致命，设置页会显式报错
+            if let Err(e) = commands::rebind_all(app.handle()) {
                 log::error!("hotkey register failed (will surface in settings): {e}");
             }
             setup_tray(app.handle())?;
@@ -78,7 +80,16 @@ pub fn run() {
             commands::cancel_capture,
             commands::pin_move,
             commands::pin_bounds,
+            commands::pin_ready,
             commands::pin_ignore_cursor,
+            commands::pin_set_through,
+            commands::pin_set_top,
+            commands::pin_from_clipboard,
+            commands::toggle_pins_visible,
+            commands::clear_through_pins,
+            commands::close_all_pins,
+            commands::open_editor_window,
+            commands::history_edit,
             commands::history_copy,
             commands::history_pin,
             commands::list_history,
@@ -90,6 +101,7 @@ pub fn run() {
             commands::permission_open_settings,
             commands::get_settings,
             commands::set_settings,
+            commands::hotkey_status,
             commands::open_settings_window,
             commands::open_history_window,
         ])
@@ -109,21 +121,52 @@ pub fn run() {
 
 use tauri::tray::TrayIconBuilder;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
-use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
 fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
-    let capture = MenuItem::with_id(app, "capture", "截图 (热键)", true, None::<&str>)?;
+    let capture = MenuItem::with_id(app, "capture", "截图", true, None::<&str>)?;
+    let clip = MenuItem::with_id(app, "pin_clip", "贴图剪贴板", true, None::<&str>)?;
+    let hide = MenuItem::with_id(app, "toggle_pins", "隐藏 / 显示全部贴图", true, None::<&str>)?;
+    let clear_through =
+        MenuItem::with_id(app, "clear_through", "解除所有贴图穿透", true, None::<&str>)?;
+    let close_pins = MenuItem::with_id(app, "close_pins", "关闭所有贴图", true, None::<&str>)?;
     let history = MenuItem::with_id(app, "history", "历史…", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "设置…", true, None::<&str>)?;
-    let sep = PredefinedMenuItem::separator(app)?;
+    let sep1 = PredefinedMenuItem::separator(app)?;
+    let sep2 = PredefinedMenuItem::separator(app)?;
+    let sep3 = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", "退出 capshot", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&capture, &sep, &history, &settings, &sep, &quit])?;
+    let menu = Menu::with_items(
+        app,
+        &[
+            &capture,
+            &clip,
+            &sep1,
+            &hide,
+            &clear_through,
+            &close_pins,
+            &sep2,
+            &history,
+            &settings,
+            &sep3,
+            &quit,
+        ],
+    )?;
     TrayIconBuilder::with_id("main")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .tooltip("capshot")
         .on_menu_event(|app, event| match event.id().as_ref() {
             "capture" => commands::trigger_capture(app),
+            "pin_clip" => {
+                if let Err(e) = commands::pin_from_clipboard(app.clone()) {
+                    log::warn!("tray pin_from_clipboard: {e:?}");
+                }
+            }
+            "toggle_pins" => {
+                let _ = commands::toggle_pins_visible(app.clone());
+            }
+            "clear_through" => commands::clear_through_pins(app.clone()),
+            "close_pins" => commands::close_all_pins(app.clone()),
             "history" => {
                 let _ = commands::open_history_window(app.clone());
             }

@@ -169,7 +169,18 @@ impl HistoryStore {
         let _ = self.conn.execute("DELETE FROM captures WHERE id=?1", params![id]);
     }
 
-    #[allow(dead_code)] // M8 重编辑
+    /// 重编辑器读回标注 JSON。之前只有写入侧（set_annotation）且从未被调用，
+    /// 所以整条「重新编辑」链路缺的就是这一环。
+    pub fn annotation_of(&self, id: i64) -> Option<String> {
+        self.conn
+            .query_row("SELECT annotation_json FROM captures WHERE id=?1", params![id], |r| r.get(0))
+            .ok()
+            .flatten()
+    }
+
+    /// 就地更新某条历史的标注。当前导出策略是「重编辑另存为新条目」（已确认的决定），
+    /// 所以这条路暂时没人调用；留着是给未来"覆盖原条目"模式的。
+    #[allow(dead_code)]
     pub fn set_annotation(&self, id: i64, json: &str) {
         let _ = self.conn.execute(
             "UPDATE captures SET annotation_json=?2 WHERE id=?1",
