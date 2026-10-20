@@ -15,9 +15,10 @@
 | M4 壳层（托盘/全局热键/单实例/日志/设置/权限页/历史窗） | ✅ 代码完成 | 实机体验待用户验证（`cargo run -p desktop`） |
 | M5 overlay 冻结帧框选（吸附/放大镜/跨屏提交） | ✅ 代码完成 | 同上 |
 | M6 标注（矩形/箭头/文字/马赛克/撤销，前端渲染导出） | ✅ 基础版 | 同上 |
-| M7 钉图（滚轮缩放锚定/透明度/拖动/双击关） | ✅ 基础版 | 同上；点击穿透按钮暂缓 |
-| M8 历史（SQLite+PNG+缩略图，复制/钉图/目录/删除） | ✅ 完成 | 重编辑（editor 窗）未做 |
-| M9 打包 / M10 打磨 | ⏳ 未开始 | —— |
+| M7 钉图（滚轮缩放锚定/透明度/拖动/双击关） | ✅ 完成 | M11 已补齐穿透开关与右键菜单 |
+| M8 历史（SQLite+PNG+缩略图，复制/钉图/目录/删除/重编辑） | ✅ 完成 | editor 窗复用 overlay 引擎（`isEditor` 分支），导出另存为新条目 |
+| M9 打包 | ⏳ 未开始 | —— |
+| M11 交互层 Snipaste 化（React+Vite / 截图层 / 标注 / 贴图 / F1·F3） | ✅ 代码完成 | `cargo test --workspace` 11/11 仍绿（抓取内核零改动）；**手感待实机验收** |
 
 ## 布局
 
@@ -25,6 +26,10 @@
 crates/capture-core     # 平台无关：契约 + 纯逻辑（全部可单测）
 crates/capture-macos    # CGWindowList* + 权限 + point↔physical 换算 + examples/probe
 crates/capture-windows  # EnumWindows/Dwm/WGC/BitBlt/PrintWindow + examples/probe（cfg 门控）
+ui/                     # Vite 多页 + React：六页各自入口，加页面要同时改 vite.config.js 的 input
+ui/src/annotate/        # 图形模型/绘制/命中/撤销栈/annotationJson v2（overlay、editor、贴图共用）
+ui/src/overlay/engine/  # 截图层命令式引擎：状态机 + rAF 画布 + 像素读取（React 只管浮层 chrome）
+ui/src/shared/theme.css # 单一样式表 + 视觉 token（按 body class 分透明/不透明作用域）
 ```
 
 坐标契约：**物理像素虚拟屏坐标**（左上原点、y 向下、负坐标合法）。窗口 z_index 前→后。
@@ -59,13 +64,30 @@ cargo check --target x86_64-pc-windows-msvc -p capture-windows   # mac 上的类
 
 ## 运行
 
+UI 是 Vite 多页工程（`ui/`）。**两种模式，别混：**
+
 ```bash
-cargo run -p desktop          # 托盘出现后：Alt+Shift+A 或点托盘「截图」
+# A. 开发模式（HMR）—— 必须两个终端，缺一不可
+cd ui && npm install && npm run dev      # 终端 1：Vite 起在 127.0.0.1:1420
+cargo run -p desktop                     # 终端 2：托盘出现后截图
+
+# B. 单命令（吃已构建的前端产物，不需要 Vite）
+cd ui && npm run build
+cargo run -p desktop --features custom-protocol
 ```
 
+为什么必须这样：`tauri` 的 `dev` cfg 等于 **`!custom_protocol`**（`tauri/build.rs:252`）。
+所以 `cargo run -p desktop` 属于 dev 模式，窗口加载 `tauri.conf.json` 里的 `build.devUrl`
+—— Vite 没起来就是白屏，不是代码坏了。反过来 `--features custom-protocol` 是**编译期**把
+`ui/dist` 打进二进制，dist 缺失会让 `generate_context!` 直接 panic（CI 因此必须先 `npm run build`）。
+`cargo test --workspace` / 不带该 feature 的 `cargo build` 都不需要 dist。
+
+- Windows 上 `tauri-build` 需要 `rc.exe`（编图标资源）；命令行环境没带 MSVC 变量时显式指路：
+  `RC='C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\rc.exe' cargo test --workspace`
+  （CI 用 `ilammy/msvc-dev-cmd` + 同样的 `$RC` 解析）
 - macOS debug 二进制首次截图会触发屏幕录制授权弹窗（TCC 按二进制路径记录，重新构建后可能需要重勾）
-- UI 为纯静态多页（`ui/`），计划中的 React+Vite 后续可按相同 IPC 接口替换
-- Windows 侧 desktop 已过类型检查，运行与真机验收需在 Windows 机器执行
+- 加新页面要同时改两处：`ui/<页>.html` **+** `ui/vite.config.js` 的 `rollupOptions.input`。
+  只加 html 不加 input，prod 构建会**静默不产出该页**，表现为该窗口白屏（CI 有逐页存在性检查兜住）
 
 ## 与参考的已知差异（记录在案）
 
@@ -76,6 +98,9 @@ cargo run -p desktop          # 托盘出现后：Alt+Shift+A 或点托盘「截
 
 ## 下一步
 
-1. **Windows 真机验收**：跑 `capture-windows` probe 矩阵（双屏异 DPI / cloaked / WGC→BitBlt 回退），再 `cargo run -p desktop` 走全流程
-2. macOS 实机体验反馈修正（overlay 焦点、全屏 Space、权限引导文案）
-3. M9 打包（NSIS/MSI + DMG，签名/公证）与 M10 打磨：editor 重编辑窗、钉图点击穿透、visible_bounds 细化（NSScreen）、React+Vite 迁移、本地时区命名
+1. **交互层 Snipaste 化**（进行中，计划见 `~/.claude/plans/soft-percolating-mango.md`）：
+   阶段 0 React+Vite 地基 ✅ → 1 截图层手感 → 2 标注工具条/属性栏 → 3 贴图窗 → 4 重编辑 + F1/F3 → 5 视觉统一。
+   **抓取内核 `crates/capture-*` 全程零改动**（千问方案不变），改造只落在 `ui/` 与 `apps/desktop/`。
+2. **Windows 真机验收**：跑 `capture-windows` probe 矩阵（双屏异 DPI / cloaked / WGC→BitBlt 回退），再走全流程
+3. macOS 实机体验反馈修正（overlay 焦点、全屏 Space、权限引导文案）
+4. M9 打包（NSIS/MSI + DMG，签名/公证）与 M10 打磨：visible_bounds 细化（NSScreen）、本地时区命名
