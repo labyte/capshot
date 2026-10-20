@@ -1,3 +1,7 @@
 target/
 node_modules/
 dist/
+
+# 本地验证产物（交叉编译/解压的测试包），不入库
+capshot-win-x64/
+capshot-win-x64.zip

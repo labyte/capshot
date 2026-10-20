@@ -32,6 +32,27 @@ jobs:
           "RC=$($rc.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
           echo "using RC=$($rc.FullName)"
       - uses: Swatinem/rust-cache@v2
+      # 前端必须先于 cargo：custom-protocol 是编译期把 ui/dist 打进二进制，
+      # dist 缺失 = generate_context! panic，dist 过期 = 静默构建旧 UI
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install UI deps
+        working-directory: ui
+        run: npm ci
+      - name: Typecheck UI
+        working-directory: ui
+        run: npm run typecheck
+      - name: Build UI
+        working-directory: ui
+        shell: bash
+        run: |
+          npm run build
+          for p in index overlay pin settings history editor; do
+            [ -f "dist/$p.html" ] || { echo "::error::dist/$p.html 未产出（vite.config.js 的 rollupOptions.input 漏页）"; exit 1; }
+          done
       - name: Unit tests
         run: cargo test --workspace
       - name: Release build (incl. desktop, MSVC/Xcode native)

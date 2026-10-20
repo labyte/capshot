@@ -28,6 +28,21 @@ jobs:
           "RC=$($rc.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
           echo "using RC=$($rc.FullName)"
       - uses: Swatinem/rust-cache@v2
+      # 前端必须先于 cargo：custom-protocol 是编译期把 ui/dist 打进二进制
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Build UI
+        working-directory: ui
+        shell: bash
+        run: |
+          npm ci
+          npm run build
+          for p in index overlay pin settings history editor; do
+            [ -f "dist/$p.html" ] || { echo "::error::dist/$p.html 未产出（vite.config.js 的 rollupOptions.input 漏页）"; exit 1; }
+          done
       - run: cargo build --release -p desktop --bin capshot --features custom-protocol
       - run: cargo build --release -p capture-windows --example probe
       - name: Package
@@ -51,6 +66,21 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # 前端必须先于 cargo：custom-protocol 是编译期把 ui/dist 打进二进制
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Build UI
+        working-directory: ui
+        shell: bash
+        run: |
+          npm ci
+          npm run build
+          for p in index overlay pin settings history editor; do
+            [ -f "dist/$p.html" ] || { echo "::error::dist/$p.html 未产出（vite.config.js 的 rollupOptions.input 漏页）"; exit 1; }
+          done
       - run: cargo build --release -p desktop --bin capshot --features custom-protocol
       - run: cargo build --release -p capture-macos --example probe
       - name: Bundle .app + zip
@@ -81,3 +111,6 @@ jobs:
             --generate-notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 本 job 无 checkout：gh 不会从 GITHUB_REPOSITORY 推断仓库（cli/cli#3556），
+          # 必须显式 GH_REPO，否则 "no repository context" 直接失败
+          GH_REPO: ${{ github.repository }}
