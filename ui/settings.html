@@ -1,15 +1,4 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>capshot 设置</title>
-<link rel="stylesheet" href="src/shared.css"></head>
-<body class="settings">
-<header><h1>设置</h1></header>
-<section id="perm"><h2>权限</h2><div id="permState"></div>
-  <div class="row"><button id="permReq">请求屏幕录制权限</button><button id="permOpen">打开系统设置</button><button id="permChk">重新检查</button></div></section>
-<section><h2>快捷键</h2><div class="row"><span>当前：</span><code id="hkNow"></code><button id="hkEdit">修改（点击后按下组合键）</button><span id="hkErr" class="err"></span></div></section>
-<section><h2>导出</h2>
- <div class="row"><label>JPEG 质量(标注导出用) <input id="quality" type="number" min="0.1" max="1" step="0.01"></label></div>
- <div class="row"><label>闪光时长 ms <input id="flash" type="number" min="0" max="2000" step="10"></label></div>
- <div class="row"><label><input id="saveCopy" type="checkbox"> 复制同时保存到历史目录</label></div>
- <div class="row"><label><input id="autostart" type="checkbox"> 开机自启</label></div></section>
-<p class="hint">说明：截图原图始终以无损 PNG 落历史目录（命名 {yyyy}-{MM}-{dd}_{HH}.{mm}.{ss}.{n}.{app}）。质量与复制同存为后续导出选项预留。</p>
-<script type="module" src="src/settings/main.js"></script></body></html>
+<html><head><meta charset="utf-8"><title>capshot 设置</title></head>
+<body class="settings"><div id="root"></div>
+<script type="module" src="src/settings/main.tsx"></script></body></html>
