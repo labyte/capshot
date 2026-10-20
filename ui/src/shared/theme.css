@@ -1,0 +1,524 @@
+/* Snipaste 量级的视觉 token + 截图浮层样式。
+   阶段 5 会把 settings/history 也从 shared.css 的硬编码色盘迁到这里。 */
+
+:root {
+  --snip-accent: #4c9ff5;
+  --snip-accent-soft: rgba(76, 159, 245, 0.28);
+  --snip-mask: rgba(0, 0, 0, 0.5);
+  --bar-bg: rgba(38, 38, 38, 0.92);
+  --bar-border: rgba(255, 255, 255, 0.08);
+  --bar-hover: rgba(255, 255, 255, 0.1);
+  --bar-active: var(--snip-accent);
+  --bar-radius: 6px;
+  --bar-fg: #dfe4ee;
+  --bar-muted: #9aa4b2;
+  --label-bg: rgba(20, 22, 26, 0.82);
+  --label-font: 12px ui-monospace, "SFMono-Regular", Consolas, monospace;
+  --icon: 16px;
+  /* 页面窗（设置/历史） */
+  --page-bg: #101216;
+  --page-edge: #232733;
+  --field-bg: #141821;
+  --btn-bg: #262b38;
+  --btn-edge: #3a4150;
+  --btn-hover: #323a4d;
+  --ok: #7fd97f;
+  --no: #ff8080;
+}
+
+* { box-sizing: border-box; margin: 0; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  /* 浮层窗必须透明，页面窗必须不透明 —— 按 body class 分作用域，
+     不能一刀切，否则设置窗会变玻璃 */
+  background: var(--page-bg);
+  color: var(--bar-fg);
+  font: 13px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* overlay / pin 是透明窗；editor 是带标题栏的不透明窗，不能混进这一组 */
+body.overlay,
+body.pin { background: transparent; }
+
+body.editor { background: #1a1d24; }
+
+body.settings { overflow: auto; padding: 0 18px 24px; }
+body.history { overflow: auto; padding: 0 18px 24px; }
+
+/* ---------- 页面窗（设置 / 历史）----------
+   裸元素选择器一律限定在 body.settings / body.history 之下：
+   写在全局会渗进截图与贴图的浮层按钮，和 .snip-btn / .pin-bar button 打起来 */
+
+body.settings header,
+body.history header { display: flex; align-items: center; gap: 12px; padding: 12px 0; }
+
+body.settings h1,
+body.history h1 { font-size: 16px; font-weight: 600; }
+
+body.settings h2,
+body.history h2 { font-size: 13px; margin: 10px 0 6px; color: var(--bar-muted); }
+
+body.settings section,
+body.history section { border-top: 1px solid var(--page-edge); padding: 6px 0; }
+
+body.settings .row,
+body.history .row { display: flex; align-items: center; gap: 10px; margin: 6px 0; flex-wrap: wrap; }
+
+body.settings button,
+body.history button {
+  background: var(--btn-bg);
+  color: var(--bar-fg);
+  border: 1px solid var(--btn-edge);
+  border-radius: var(--bar-radius);
+  padding: 5px 12px;
+  cursor: pointer;
+}
+
+body.settings button:hover,
+body.history button:hover { background: var(--btn-hover); }
+
+body.settings input[type="number"] {
+  width: 90px;
+  background: var(--field-bg);
+  color: var(--bar-fg);
+  border: 1px solid var(--btn-edge);
+  border-radius: 5px;
+  padding: 3px 6px;
+}
+
+body.settings code {
+  background: var(--field-bg);
+  padding: 2px 8px;
+  border-radius: 5px;
+}
+
+.err { color: var(--no); }
+.hint { color: #7d8796; margin-top: 14px; }
+.hk-label { min-width: 150px; color: var(--bar-muted); }
+.hint-inline { font-size: 11px; color: #7d8796; }
+.perm-ok { color: var(--ok); }
+.perm-no { color: var(--no); }
+
+#grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  padding-bottom: 20px;
+}
+
+.card {
+  background: #161a22;
+  border: 1px solid var(--page-edge);
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.card img {
+  width: 100%;
+  height: 120px;
+  object-fit: contain;
+  background: #0b0d11;
+  display: block;
+}
+
+.card .meta {
+  padding: 6px 8px;
+  font-size: 11px;
+  color: var(--bar-muted);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 缩略图为主，动作图标浮层：默认不占视线，悬停才从右下角浮出 */
+.card .thumb { position: relative; }
+
+.card-acts {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--bar-bg);
+  border: 1px solid var(--bar-border);
+  border-radius: var(--bar-radius);
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.card:hover .card-acts,
+.card:focus-within .card-acts {
+  opacity: 1;
+  transform: none;
+}
+
+.card-acts button {
+  width: 24px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--bar-fg);
+}
+
+.card-acts button:hover { background: var(--bar-hover); }
+.card .meta .acts { display: flex; gap: 4px; }
+
+.card .meta button {
+  padding: 1px 7px;
+  font-size: 11px;
+  border-radius: 4px;
+}
+
+.snip-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: crosshair;
+}
+#flash {
+  position: fixed;
+  inset: 0;
+  background: #fff;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 90;
+}
+
+/* ---------- 工具条 / 属性栏 ---------- */
+
+/* 尺寸对齐 Snipaste 标注条：16px 图标 + 24×22 按钮 + 2px 间隙，整条更紧凑 */
+.snip-bar {
+  position: fixed;
+  z-index: 60;
+  background: var(--bar-bg);
+  border: 1px solid var(--bar-border);
+  border-radius: var(--bar-radius);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+  padding: 2px;
+  display: flex;
+}
+
+.snip-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.snip-btn {
+  width: 24px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--bar-fg);
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.snip-btn:hover { background: var(--bar-hover); }
+.snip-btn:disabled { opacity: 0.35; cursor: default; }
+.snip-btn.on { background: var(--bar-active); color: #fff; }
+.snip-btn.accent { color: var(--snip-accent); }
+.snip-btn.accent:hover { background: var(--snip-accent); color: #fff; }
+.snip-btn.danger:hover { background: #d64a45; color: #fff; }
+
+.snip-sep {
+  width: 1px;
+  height: 18px;
+  background: rgba(255, 255, 255, 0.14);
+  margin: 0 4px;
+  flex: none;
+}
+
+.snip-props { padding: 4px 5px; }
+
+.snip-color {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  flex: none;
+  cursor: pointer;
+}
+
+.snip-color input {
+  width: 32px;
+  height: 32px;
+  margin: -5px;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  background: none;
+}
+
+.snip-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  padding: 0;
+  flex: none;
+}
+
+.snip-swatch.on { outline: 2px solid var(--snip-accent); outline-offset: 1px; }
+
+.snip-wbtn {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.snip-wbtn:hover { background: var(--bar-hover); }
+.snip-wbtn.on { background: var(--bar-active); }
+.snip-wbtn span {
+  display: block;
+  width: 12px;
+  border-radius: 999px;
+  background: var(--bar-fg);
+}
+
+.snip-chip {
+  height: 22px;
+  padding: 0 7px;
+  background: transparent;
+  color: var(--bar-muted);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.snip-chip:hover { background: var(--bar-hover); color: var(--bar-fg); }
+.snip-chip.on { background: var(--bar-active); border-color: var(--bar-active); color: #fff; }
+.snip-level { font: var(--label-font); color: var(--bar-muted); padding: 0 4px; }
+
+/* ---------- 放大镜 ---------- */
+
+.snip-loupe {
+  position: fixed;
+  z-index: 55;
+  background: var(--bar-bg);
+  border: 1px solid var(--bar-border);
+  border-radius: var(--bar-radius);
+  padding: 5px;
+  pointer-events: none;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+}
+
+.snip-loupe canvas {
+  display: block;
+  width: 153px;
+  height: 153px;
+  image-rendering: pixelated;
+  border-radius: 3px;
+}
+
+.snip-loupe-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+  font: var(--label-font);
+}
+
+.snip-loupe-chip {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  flex: none;
+}
+
+.snip-loupe-text { color: var(--bar-fg); white-space: nowrap; }
+
+.snip-loupe-hint {
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--bar-muted);
+  white-space: nowrap;
+}
+
+/* ---------- 跟随光标的读数 ---------- */
+
+.snip-label {
+  position: fixed;
+  z-index: 58;
+  background: var(--label-bg);
+  color: #fff;
+  font: var(--label-font);
+  padding: 1px 6px;
+  border-radius: 3px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.snip-label.strong { color: var(--snip-accent); }
+
+.snip-wintitle {
+  position: fixed;
+  z-index: 57;
+  background: var(--label-bg);
+  color: var(--bar-fg);
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  pointer-events: none;
+  white-space: nowrap;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- 文字输入 / 提示 ---------- */
+
+.snip-textinput { position: fixed; z-index: 62; }
+
+.snip-textinput input {
+  font: inherit;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px dashed var(--snip-accent);
+  outline: none;
+  padding: 2px 5px;
+  min-width: 140px;
+}
+
+.snip-toast {
+  position: fixed;
+  left: 50%;
+  top: 18px;
+  transform: translateX(-50%);
+  z-index: 80;
+  background: var(--bar-bg);
+  border: 1px solid rgba(214, 74, 69, 0.6);
+  color: #ffd9d7;
+  padding: 5px 12px;
+  border-radius: var(--bar-radius);
+  font-size: 12px;
+}
+
+.snip-fatal {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  z-index: 95;
+}
+
+/* ---------- 贴图（pin） ----------
+   窗口 = 图像 + 四周 PAD。投影用窗内 drop-shadow 自绘，而不是 DWM 的 shadow(true)：
+   后者会给无边框窗加 8px 不可见 resize 边，「贴回原处」就偏了。 */
+
+body.pin {
+  background: transparent;
+  cursor: grab;
+}
+
+body.pin:active { cursor: grabbing; }
+
+.pin-root {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+}
+
+.pin-img {
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.45));
+  outline: 1px solid rgba(255, 255, 255, 0.22);
+  outline-offset: -1px;
+}
+
+.pin-root:hover .pin-img {
+  outline-color: var(--snip-accent);
+  filter: drop-shadow(0 2px 10px rgba(76, 159, 245, 0.5));
+}
+
+.pin-bar {
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  align-items: center;
+  gap: 2px;
+  background: var(--bar-bg);
+  border: 1px solid var(--bar-border);
+  border-radius: var(--bar-radius);
+  padding: 2px 4px;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.35);
+}
+
+.pin-root:hover .pin-bar { display: flex; }
+
+.pin-bar button {
+  background: transparent;
+  border: 0;
+  color: var(--bar-fg);
+  font-size: 12px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.pin-bar button:hover { background: var(--bar-hover); }
+
+.pin-zoom {
+  font: var(--label-font);
+  color: var(--bar-muted);
+  padding: 0 6px;
+}
+
+.pin-sep {
+  width: 1px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.pin-bubble {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--label-bg);
+  color: #fff;
+  font: var(--label-font);
+  padding: 4px 12px;
+  border-radius: var(--bar-radius);
+  pointer-events: none;
+}
