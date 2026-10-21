@@ -4,6 +4,9 @@ Tauri v2 截图工具（对齐 Snipaste 交互），Rust workspace + Vite/React 
 
 ## 发布构建规则（release.yml，tag `v*` 触发）
 
+- **仅 main 分支触发发布**：release.yml 有 `preflight` 守卫，判断「被推的标签提交是否为
+  `origin/main` 的祖先」，不在 main 上则三个 job 全部跳过。发布流程固定为：
+  开发分支 → 合并到 main → 在 main 上打 `v*` 标签 → 才构建。
 - **压缩包文件名必须带版本号**：`capshot-win-x64-<tag>.zip`、`capshot-macos-arm64-<tag>.zip`
   （如 `capshot-win-x64-v0.1.8.zip`）。tag 从 `GITHUB_REF_NAME` 取；
   upload-artifact 的 path 用 glob（`capshot-*-*.zip`），Create Release 步骤同步匹配。

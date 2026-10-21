@@ -11,7 +11,31 @@ permissions:
   contents: write
 
 jobs:
+  # 守卫：仅当被推的标签提交在 main 上时才继续。tag push 不携带分支信息，
+  # 用「标签 commit 是否为 origin/main 的祖先」判定，避免在开发分支打标签误触发发布。
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      on-main: ${{ steps.check.outputs.on-main }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: check
+        shell: bash
+        run: |
+          git fetch origin main
+          if git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "on-main=true" >> "$GITHUB_OUTPUT"
+            echo "标签在 main 上，继续发布"
+          else
+            echo "on-main=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::标签提交不在 main 分支上，跳过发布（仅 main 触发构建）"
+          fi
+
   build-windows:
+    needs: preflight
+    if: needs.preflight.outputs.on-main == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -61,6 +85,8 @@ jobs:
           path: capshot-win-x64-*.zip
 
   build-macos:
+    needs: preflight
+    if: needs.preflight.outputs.on-main == 'true'
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -96,7 +122,8 @@ jobs:
           path: capshot-macos-arm64-*.zip
 
   release:
-    needs: [build-windows, build-macos]
+    needs: [preflight, build-windows, build-macos]
+    if: needs.preflight.outputs.on-main == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
