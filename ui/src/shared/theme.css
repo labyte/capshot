@@ -12,6 +12,17 @@
   --bar-radius: 6px;
   --bar-fg: #dfe4ee;
   --bar-muted: #9aa4b2;
+  /* 标注工具条/属性栏：Snipaste 的浮条是浅灰底 + 深灰图标 + 选中淡蓝药丸，
+     放大镜、读数、贴图条仍是深底（--bar-*），两套并存 */
+  --tb-bg: #f4f5f6;
+  --tb-edge: #d6d8db;
+  --tb-fg: #5f6368;
+  --tb-fg-strong: #202124;
+  --tb-hover: rgba(95, 99, 104, 0.14);
+  --tb-on-bg: #d3e5fb;
+  --tb-on-fg: #1a6fc4;
+  --tb-sep: #d0d2d6;
+  --tb-muted: #7a7f87;
   --label-bg: rgba(20, 22, 26, 0.82);
   --label-font: 12px ui-monospace, "SFMono-Regular", Consolas, monospace;
   --icon: 16px;
@@ -202,14 +213,15 @@ body.settings code {
 
 /* ---------- 工具条 / 属性栏 ---------- */
 
-/* 尺寸对齐 Snipaste 标注条：16px 图标 + 24×22 按钮 + 2px 间隙，整条更紧凑 */
+/* 尺寸对齐 Snipaste 标注条：16px 图标 + 24×22 按钮 + 2px 间隙，整条更紧凑。
+   配色对齐 Snipaste：浅灰底、深灰图标、选中淡蓝药丸，图标用 currentColor 随主题走 */
 .snip-bar {
   position: fixed;
   z-index: 60;
-  background: var(--bar-bg);
-  border: 1px solid var(--bar-border);
+  background: var(--tb-bg);
+  border: 1px solid var(--tb-edge);
   border-radius: var(--bar-radius);
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.22);
   padding: 2px;
   display: flex;
 }
@@ -227,24 +239,24 @@ body.settings code {
   align-items: center;
   justify-content: center;
   background: transparent;
-  color: var(--bar-fg);
+  color: var(--tb-fg);
   border: 0;
   border-radius: 4px;
   cursor: pointer;
   padding: 0;
 }
 
-.snip-btn:hover { background: var(--bar-hover); }
-.snip-btn:disabled { opacity: 0.35; cursor: default; }
-.snip-btn.on { background: var(--bar-active); color: #fff; }
-.snip-btn.accent { color: var(--snip-accent); }
-.snip-btn.accent:hover { background: var(--snip-accent); color: #fff; }
-.snip-btn.danger:hover { background: #d64a45; color: #fff; }
+.snip-btn:hover { background: var(--tb-hover); color: var(--tb-fg-strong); }
+.snip-btn:disabled { opacity: 0.3; cursor: default; }
+.snip-btn.on { background: var(--tb-on-bg); color: var(--tb-on-fg); }
+.snip-btn.accent { color: var(--tb-on-fg); }
+.snip-btn.accent:hover { background: var(--tb-on-bg); color: var(--tb-on-fg); }
+.snip-btn.danger:hover { background: #f7d6d3; color: #cf3b32; }
 
 .snip-sep {
   width: 1px;
   height: 18px;
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--tb-sep);
   margin: 0 4px;
   flex: none;
 }
@@ -256,7 +268,7 @@ body.settings code {
   height: 22px;
   border-radius: 4px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  border: 1px solid var(--tb-edge);
   flex: none;
   cursor: pointer;
 }
@@ -281,43 +293,87 @@ body.settings code {
   flex: none;
 }
 
-.snip-swatch.on { outline: 2px solid var(--snip-accent); outline-offset: 1px; }
+.snip-swatch.on { outline: 2px solid var(--tb-on-fg); outline-offset: 1px; }
 
-.snip-wbtn {
-  width: 22px;
-  height: 22px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: 0;
-  border-radius: 4px;
-  cursor: pointer;
+/* 尺寸圆点按钮：单个 • 点击循环档位，右上角红点提示"可调"（对齐 Snipaste 的 • 按钮）。
+   圆点直径由内联 style 按当前 width/eraserRadius 给，currentColor 让选中态下点变白 */
+.snip-wdot {
+  position: relative;
+  min-width: 24px;
 }
-
-.snip-wbtn:hover { background: var(--bar-hover); }
-.snip-wbtn.on { background: var(--bar-active); }
-.snip-wbtn span {
+.snip-wdot span {
   display: block;
-  width: 12px;
   border-radius: 999px;
-  background: var(--bar-fg);
+  background: currentColor;
 }
+.snip-wdot::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #e5533d;
+  border: 1px solid var(--tb-bg);
+}
+
+/* 马克笔/橡皮擦的半透明笔刷示意（参考图里的斜纹方块） */
+.snip-hatch {
+  width: 22px;
+  height: 18px;
+  flex: none;
+  border-radius: 3px;
+  border: 1px solid var(--tb-edge);
+  background: repeating-linear-gradient(
+    45deg,
+    var(--tb-muted) 0 2px,
+    transparent 2px 5px
+  );
+}
+
+.snip-astyle { width: 84px; }
 
 .snip-chip {
   height: 22px;
   padding: 0 7px;
   background: transparent;
-  color: var(--bar-muted);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--tb-muted);
+  border: 1px solid var(--tb-edge);
   border-radius: 4px;
   cursor: pointer;
   font-size: 12px;
 }
 
-.snip-chip:hover { background: var(--bar-hover); color: var(--bar-fg); }
-.snip-chip.on { background: var(--bar-active); border-color: var(--bar-active); color: #fff; }
-.snip-level { font: var(--label-font); color: var(--bar-muted); padding: 0 4px; }
+.snip-chip:hover { background: var(--tb-hover); color: var(--tb-fg-strong); }
+.snip-chip.on { background: var(--tb-on-bg); border-color: var(--tb-on-bg); color: var(--tb-on-fg); }
+.snip-level { font: var(--label-font); color: var(--tb-muted); padding: 0 4px; }
+
+/* 文字样式按钮（B/I/删除线）：图标位用字形本身表达 */
+.snip-tbtn {
+  width: auto;
+  min-width: 22px;
+  padding: 0 5px;
+  font: 13px/1 Georgia, "Times New Roman", serif;
+}
+.snip-tbtn.b { font-weight: 700; }
+.snip-tbtn.i { font-style: italic; }
+.snip-tbtn.s { text-decoration: line-through; }
+
+/* 字体/字号下拉：贴合浅灰属性栏，别用系统默认白框 */
+.snip-select {
+  height: 22px;
+  max-width: 150px;
+  background: #fff;
+  color: var(--tb-fg-strong);
+  border: 1px solid var(--tb-edge);
+  border-radius: 4px;
+  font-size: 12px;
+  padding: 0 4px;
+  cursor: pointer;
+}
+.snip-select:focus { outline: 1px solid var(--tb-on-fg); }
+.snip-size { width: 56px; }
 
 /* ---------- 放大镜 ---------- */
 
@@ -408,6 +464,9 @@ body.settings code {
   outline: none;
   padding: 2px 5px;
   min-width: 140px;
+  /* 全局 user-select:none 会渗进输入框：打字没事，但框内选不了字 */
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .snip-toast {

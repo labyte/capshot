@@ -33,6 +33,14 @@ export const IconRect = (p: P) => (
   </Svg>
 );
 
+/** 形状工具：矩形 + 椭圆叠加（Snipaste 形状按钮样式） */
+export const IconShapes = (p: P) => (
+  <Svg {...p}>
+    <rect x="2" y="5" width="8.5" height="8.5" />
+    <ellipse cx="10.5" cy="6.5" rx="3.5" ry="3.5" />
+  </Svg>
+);
+
 export const IconEllipse = (p: P) => (
   <Svg {...p}>
     <ellipse cx="8" cy="8" rx="5.625" ry="4.625" />
@@ -126,6 +134,14 @@ export const IconCopy = (p: P) => (
 export const IconClose = (p: P) => (
   <Svg {...p}>
     <path d="M4 4l8 8M12 4l-8 8" />
+  </Svg>
+);
+
+/** 斜握橡皮：菱形块 + 底边擦除线（Snipaste 第二行工具序） */
+export const IconEraser = (p: P) => (
+  <Svg {...p}>
+    <path d="M8.2 2.8 13.2 7.8 9.8 11.2H5.4L2.8 8.6Z" />
+    <path d="M6.8 13.4h6.6" opacity=".7" />
   </Svg>
 );
 

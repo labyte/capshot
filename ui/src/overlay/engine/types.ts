@@ -14,7 +14,16 @@ export interface Point {
 
 export type Handle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 
-export type ToolId = "rect" | "ellipse" | "arrow" | "polyline" | "marker" | "text" | "mosaic" | "step";
+export type ToolId =
+  | "rect"
+  | "ellipse"
+  | "arrow"
+  | "polyline"
+  | "marker"
+  | "text"
+  | "mosaic"
+  | "step"
+  | "eraser";
 
 /** 交互阶段：悬停检测 → 拖框 → 已定选区 → 画图中 → 拖拽已有图形 */
 export type Phase = "picking" | "drawing" | "adjusting" | "tool-drawing" | "shape-drag";

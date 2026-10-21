@@ -17,6 +17,8 @@ export interface PaintInput {
   accent: string;
   maskAlpha: number;
   handleSize: number;
+  /** 橡皮刷圈（物理 px，跟随光标）；null 不画 */
+  eraserRing: { x: number; y: number; r: number } | null;
 }
 
 export function paint(
@@ -73,5 +75,20 @@ export function paint(
       ctx.fillRect(p.x - hs / 2, p.y - hs / 2, hs, hs);
       ctx.strokeRect(p.x - hs / 2, p.y - hs / 2, hs, hs);
     }
+  }
+
+  // 橡皮刷圈：白底 + 深色描边，任何背景都看得见
+  if (i.eraserRing) {
+    const { x, y, r } = i.eraserRing;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,255,255,0.18)";
+    ctx.fill();
+    ctx.lineWidth = Math.max(1.5, r / 12);
+    ctx.strokeStyle = "#fff";
+    ctx.stroke();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(0,0,0,0.5)";
+    ctx.stroke();
   }
 }

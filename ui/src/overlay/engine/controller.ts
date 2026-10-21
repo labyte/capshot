@@ -8,7 +8,7 @@ import { paint } from "./painter";
 import { PixelReader } from "./pixelReader";
 import { makeScratch } from "../../annotate/mosaic";
 import { drawShapes } from "../../annotate/render";
-import { DEFAULT_PROPS, type DrawProps, type Shape } from "../../annotate/model";
+import { DEFAULT_PROPS, shapeBounds, type DrawProps, type Shape } from "../../annotate/model";
 import { parse as parseAnnotation } from "../../annotate/serialize";
 import {
   clamp,
@@ -57,6 +57,7 @@ type Anchor =
   | { mode: "move"; rect0: Rect; start: Point }
   | { mode: "shape-new"; start: Point; id: number }
   | { mode: "shape-move"; start: Point; id: number; origin: Shape }
+  | { mode: "erase"; start: Point; deleted: boolean }
   | null;
 
 export interface FrameInfo {
@@ -88,6 +89,7 @@ const TOOL_KEYS: Record<string, ToolId> = {
   t: "text",
   x: "mosaic",
   n: "step",
+  e: "eraser",
 };
 
 const WASD: Record<string, [number, number]> = {
@@ -336,6 +338,10 @@ export class OverlayController {
         accent: ACCENT,
         maskAlpha: MASK_ALPHA,
         handleSize: this.handleSize,
+        eraserRing:
+          s.tool === "eraser" && this.pointer && (s.phase === "adjusting" || s.phase === "tool-drawing")
+            ? { x: this.pointer.x, y: this.pointer.y, r: s.props.eraserRadius * this.scale }
+            : null,
       },
     );
     this.publishFrameInfo();
@@ -468,7 +474,8 @@ export class OverlayController {
     const s = this.state;
     const p = this.pointer;
     let c = "crosshair";
-    if (s.pendingTextAt) c = "text";
+    if (s.tool === "eraser") c = "none"; // 橡皮用画布上自绘的刷圈当光标
+    else if (s.pendingTextAt) c = "text";
     else if (s.phase === "adjusting" && !s.tool && p) {
       const h = this.hitHandle(p);
       if (h) c = CURSOR_FOR_HANDLE[h];
@@ -616,6 +623,8 @@ export class OverlayController {
     } else if (a.mode === "shape-move") {
       const sh = this.state.shapes.find((x) => x.id === a.id);
       if (sh) applyFromOrigin(sh, a.origin, p.x - a.start.x, p.y - a.start.y);
+    } else if (a.mode === "erase") {
+      this.eraseAt(p);
     }
     this.updateCursor();
     this.mark();
@@ -672,6 +681,12 @@ export class OverlayController {
     const s = this.state;
     if (s.phase === "tool-drawing" && this.anchor?.mode === "shape-new") {
       this.settleShape(this.anchor.id);
+      this.anchor = null;
+      this.store.set({ phase: "adjusting" });
+      this.mark();
+      return;
+    }
+    if (this.anchor?.mode === "erase") {
       this.anchor = null;
       this.store.set({ phase: "adjusting" });
       this.mark();
@@ -924,7 +939,9 @@ export class OverlayController {
   // ---------- 工具、属性与图形 ----------
 
   setTool(t: ToolId | null): void {
-    this.store.set({ tool: t, selectedId: null });
+    // 切工具时丢弃未提交的文字输入（输入框随 pendingTextAt 一起消失）
+    this.store.set({ tool: t, selectedId: null, pendingTextAt: null });
+    this.pendingTextValue = "";
     this.mark();
   }
 
@@ -959,6 +976,14 @@ export class OverlayController {
       this.mark();
       return;
     }
+    if (kind === "eraser") {
+      // 橡皮擦不产图形：按下/拖过的范围内的标注直接删，整次拖拽只压一次撤销
+      this.store.set({ phase: "tool-drawing", selectedId: null });
+      this.anchor = { mode: "erase", start: p, deleted: false };
+      this.eraseAt(p);
+      this.mark();
+      return;
+    }
     const sc = this.scale;
     const props = this.state.props;
     const base = { id: this.nextShapeId++, color: props.color, width: props.width * sc };
@@ -974,7 +999,7 @@ export class OverlayController {
         level: props.mosaicLevel,
       };
     } else if (kind === "arrow") {
-      shape = { ...base, kind: "arrow", a: { ...p }, b: { ...p } };
+      shape = { ...base, kind: "arrow", a: { ...p }, b: { ...p }, double: props.arrowDouble };
     } else if (kind === "polyline" || kind === "marker") {
       shape = { ...base, kind, pts: [{ ...p }] };
     } else {
@@ -1060,6 +1085,24 @@ export class OverlayController {
     this.mark();
   }
 
+  /** 橡皮擦：删掉包围盒碰到笔刷圆的所有图形；整次拖拽只在首次删除时压一次撤销栈 */
+  private eraseAt(p: Point): void {
+    const r = this.state.props.eraserRadius * this.scale;
+    const hits = this.state.shapes.filter((s) => {
+      const b = shapeBounds(s);
+      return p.x >= b.x - r && p.x <= b.x + b.w + r && p.y >= b.y - r && p.y <= b.y + b.h + r;
+    });
+    if (!hits.length) return;
+    const a = this.anchor;
+    if (a?.mode === "erase" && !a.deleted) {
+      this.pushUndo();
+      a.deleted = true;
+    }
+    const gone = new Set(hits.map((s) => s.id));
+    this.store.set({ shapes: this.state.shapes.filter((s) => !gone.has(s.id)) });
+    this.mark();
+  }
+
   private touchShapes(): void {
     this.store.set({ shapes: [...this.state.shapes] });
   }
@@ -1070,8 +1113,10 @@ export class OverlayController {
     const at = this.state.pendingTextAt;
     const text = this.pendingTextValue?.trim();
     if (!at) return;
+    // 提交后保持文字工具激活：点别处=结束上一条，再点=直接开下一条（Snipaste 的连续标注）
     if (text) {
       const sc = this.scale;
+      const p = this.state.props;
       this.pushUndo();
       this.store.set({
         shapes: [
@@ -1079,19 +1124,22 @@ export class OverlayController {
           {
             id: this.nextShapeId++,
             kind: "text",
-            color: this.state.props.color,
+            color: p.color,
             width: 0,
             at: { ...at },
             text,
-            fontPx: this.state.props.fontPx * sc,
-            bg: this.state.props.textBg,
+            fontPx: p.fontPx * sc,
+            bg: p.textBg,
+            bold: p.textBold,
+            italic: p.textItalic,
+            strike: p.textStrike,
+            family: p.textFamily,
           },
         ],
         pendingTextAt: null,
-        tool: null,
       });
     } else {
-      this.store.set({ pendingTextAt: null, tool: null });
+      this.store.set({ pendingTextAt: null });
     }
     this.pendingTextValue = "";
     this.mark();
@@ -1213,6 +1261,8 @@ export class OverlayController {
 
   /** UI 与快捷键统一入口：失败必须可见，不能静默卡在截图态 */
   async run(op: Op): Promise<void> {
+    // 输入框不再靠 blur 提交：走按钮/快捷键导出前，先把在编文字落定
+    if (this.state.pendingTextAt) this.commitText();
     try {
       await this.finish(op);
     } catch (e) {

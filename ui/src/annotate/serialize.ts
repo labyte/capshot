@@ -112,8 +112,18 @@ export function propsOf(s: Shape): Partial<DrawProps> {
       return { color: s.color, width: s.width, filled: s.filled };
     case "mosaic":
       return { mosaicStyle: s.style, mosaicLevel: s.level };
+    case "arrow":
+      return { color: s.color, width: s.width, arrowDouble: s.double ?? false };
     case "text":
-      return { color: s.color, fontPx: s.fontPx, textBg: s.bg };
+      return {
+        color: s.color,
+        fontPx: s.fontPx,
+        textBg: s.bg,
+        textBold: s.bold ?? false,
+        textItalic: s.italic ?? false,
+        textStrike: s.strike ?? false,
+        textFamily: s.family ?? "Microsoft YaHei UI",
+      };
     default:
       return { color: s.color, width: s.width };
   }

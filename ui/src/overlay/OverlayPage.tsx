@@ -36,6 +36,8 @@ export default function OverlayPage() {
       const c = new OverlayController(b, canvasRef.current!);
       ctrl = c;
       ctrlRef.current = c;
+      // dev 调试钩子：CDP 自动化与手动 console 都能直接读 store 状态
+      if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__ctrl = c;
       const ok = await c.loadFrame();
       if (!ok || cancelled) {
         await c.cancel();

@@ -40,7 +40,7 @@ export function drawShape(c: CanvasRenderingContext2D, s: Shape, deps: RenderDep
       break;
     }
     case "arrow": {
-      drawArrow(c, s.a.x, s.a.y, s.b.x, s.b.y, s.color, s.width, deps.scale);
+      drawArrow(c, s.a.x, s.a.y, s.b.x, s.b.y, s.color, s.width, deps.scale, s.double ?? false);
       break;
     }
     case "polyline":
@@ -64,15 +64,22 @@ export function drawShape(c: CanvasRenderingContext2D, s: Shape, deps: RenderDep
     }
     case "text": {
       c.save();
-      c.font = `${Math.round(s.fontPx)}px ${FONT_STACK}`;
+      const style = `${s.bold ? "bold " : ""}${s.italic ? "italic " : ""}${Math.round(s.fontPx)}px ${
+        s.family ? `"${s.family}", ` : ""
+      }${FONT_STACK}`;
+      c.font = style;
       c.textBaseline = "top";
+      const m = c.measureText(s.text);
       if (s.bg) {
-        const m = c.measureText(s.text);
         c.fillStyle = "rgba(0,0,0,.45)";
         c.fillRect(s.at.x - 2, s.at.y - 2, m.width + 4, s.fontPx + 4);
       }
       c.fillStyle = s.color;
       c.fillText(s.text, s.at.x, s.at.y);
+      if (s.strike) {
+        // canvas 没有原生删除线：按字体度量手动画一道（基线 top，字面中部约 0.62em）
+        c.fillRect(s.at.x, s.at.y + s.fontPx * 0.62, m.width, Math.max(1, s.fontPx * 0.07));
+      }
       c.restore();
       break;
     }
@@ -111,9 +118,18 @@ export function drawArrow(
   color: string,
   width: number,
   scale: number,
+  double = false,
 ): void {
   const ang = Math.atan2(y2 - y1, x2 - x1);
   const head = Math.max(10 * scale, width * 3);
+  const tip = (tx: number, ty: number, a: number) => {
+    c.beginPath();
+    c.moveTo(tx, ty);
+    c.lineTo(tx - head * Math.cos(a - 0.5), ty - head * Math.sin(a - 0.5));
+    c.lineTo(tx - head * Math.cos(a + 0.5), ty - head * Math.sin(a + 0.5));
+    c.closePath();
+    c.fill();
+  };
   c.strokeStyle = c.fillStyle = color;
   c.lineWidth = width;
   c.lineCap = "round";
@@ -121,12 +137,9 @@ export function drawArrow(
   c.moveTo(x1, y1);
   c.lineTo(x2, y2);
   c.stroke();
-  c.beginPath();
-  c.moveTo(x2, y2);
-  c.lineTo(x2 - head * Math.cos(ang - 0.5), y2 - head * Math.sin(ang - 0.5));
-  c.lineTo(x2 - head * Math.cos(ang + 0.5), y2 - head * Math.sin(ang + 0.5));
-  c.closePath();
-  c.fill();
+  tip(x2, y2, ang);
+  // ↔：起点补一个反向箭头
+  if (double) tip(x1, y1, ang + Math.PI);
 }
 
 export function drawShapes(

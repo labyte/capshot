@@ -111,7 +111,9 @@ export function layoutChrome(ctrl: OverlayController, refs: ChromeRefs) {
     if (propsEl) {
       propsEl.style.left = px(left);
       propsEl.style.top = px(top + (bar.offsetHeight || 34) + 4);
-      propsEl.style.display = propsEl.textContent ? "flex" : "none";
+      // 组件挂载即该显示：不能用 textContent 判断——马克笔/橡皮擦的属性栏全是图形控件，
+      // 没有文字就会被误藏（老 bug：马克笔栏从来没出现过）
+      propsEl.style.display = "flex";
     }
   } else {
     if (bar) bar.style.display = "none";

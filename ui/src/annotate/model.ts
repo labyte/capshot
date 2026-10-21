@@ -29,6 +29,8 @@ export interface ArrowShape extends BaseShape {
   kind: "arrow";
   a: Point;
   b: Point;
+  /** 双向箭头（属性栏的 →/↔ 选择）。旧数据缺省 = 单向 */
+  double?: boolean;
 }
 
 export interface PathShape extends BaseShape {
@@ -42,6 +44,11 @@ export interface TextShape extends BaseShape {
   text: string;
   fontPx: number;
   bg: boolean;
+  /** 文字样式（Snipaste 属性栏的 B/I/删除线/字体）。旧数据没有这些字段，一律按缺省渲染 */
+  bold?: boolean;
+  italic?: boolean;
+  strike?: boolean;
+  family?: string;
 }
 
 export interface MosaicShape extends BaseShape {
@@ -73,11 +80,34 @@ export interface DrawProps {
   filled: boolean;
   fontPx: number;
   textBg: boolean;
+  textBold: boolean;
+  textItalic: boolean;
+  textStrike: boolean;
+  textFamily: string;
+  /** 箭头：true = 两端箭头（↔），false = 单端（→） */
+  arrowDouble: boolean;
   mosaicStyle: "pixel" | "blur";
   mosaicLevel: number;
   stepNo: number;
   stepRadius: number;
+  /** 橡皮擦命中半径（CSS px，物理化在 controller 里乘 scale） */
+  eraserRadius: number;
 }
+
+/** 字体下拉的候选（webview 里无法枚举系统字体，给一组 Windows 常见 + 兜底） */
+export const FONT_FAMILIES = [
+  "Microsoft YaHei UI",
+  "Microsoft YaHei",
+  "SimSun",
+  "SimHei",
+  "KaiTi",
+  "Segoe UI",
+  "Arial",
+  "Consolas",
+];
+
+/** 字号下拉的候选（CSS px，物理像素在 controller 里乘 scale） */
+export const FONT_SIZES = [12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64];
 
 export const DEFAULT_PROPS: DrawProps = {
   color: "#ff3b30",
@@ -85,11 +115,20 @@ export const DEFAULT_PROPS: DrawProps = {
   filled: false,
   fontPx: 18,
   textBg: false,
+  textBold: false,
+  textItalic: false,
+  textStrike: false,
+  textFamily: "Microsoft YaHei UI",
+  arrowDouble: false,
   mosaicStyle: "pixel",
   mosaicLevel: 8,
   stepNo: 1,
   stepRadius: 14,
+  eraserRadius: 16,
 };
+
+/** 线宽/尺寸按钮的档位：属性栏用单个圆点循环切换（对齐 Snipaste 的 • 按钮） */
+export const ERASER_SIZES = [10, 16, 24, 36];
 
 /** Snipaste 调色板量级的一排预设 */
 export const PALETTE = [
