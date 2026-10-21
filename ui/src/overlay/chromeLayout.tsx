@@ -35,19 +35,14 @@ export function layoutChrome(ctrl: OverlayController, refs: ChromeRefs) {
     const r = i.sel;
     if (r && (i.phase === "drawing" || i.phase === "adjusting")) {
       refs.sizeLabel.textContent = `${Math.round(r.w)} × ${Math.round(r.h)} px`;
-      if (i.phase === "drawing" && i.pointer) {
-        // 拖框中贴着光标走：此时工具条隐藏，没有遮挡问题，读数跟着视线最自然
-        const p = toCss(i.pointer);
-        refs.sizeLabel.style.left = px(p.left + 14);
-        refs.sizeLabel.style.top = px(p.top + 12);
-      } else {
-        // 定框后钉在选区左上角上方（原先在右下角，正好被选区下方的工具条盖住）；
-        // 贴屏幕顶边放不下时翻进选区内侧
-        const p = toCss({ x: r.x, y: r.y });
-        const lh = refs.sizeLabel.offsetHeight || 20;
-        refs.sizeLabel.style.left = px(p.left);
-        refs.sizeLabel.style.top = px(p.top - lh - 4 >= 2 ? p.top - lh - 4 : p.top + 6);
-      }
+      // 全程钉在选区左上角上方（拖框中也一样，不再跟光标跑）：
+      // 右下角会被选区下方的工具条盖住，跟光标跑又会和放大镜叠在一起。
+      // 贴屏幕顶边放不下时翻进选区内侧。
+      // 注意 r.x/r.y 是 norm() 后的最小角，所以往任意方向拖都恒为视觉左上角。
+      const p = toCss({ x: r.x, y: r.y });
+      const lh = refs.sizeLabel.offsetHeight || 20;
+      refs.sizeLabel.style.left = px(p.left);
+      refs.sizeLabel.style.top = px(p.top - lh - 4 >= 2 ? p.top - lh - 4 : p.top + 6);
       refs.sizeLabel.style.display = "block";
     } else {
       refs.sizeLabel.style.display = "none";
