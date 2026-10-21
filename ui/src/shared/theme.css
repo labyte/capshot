@@ -26,15 +26,20 @@
   --label-bg: rgba(20, 22, 26, 0.82);
   --label-font: 12px ui-monospace, "SFMono-Regular", Consolas, monospace;
   --icon: 16px;
-  /* 页面窗（设置/历史） */
-  --page-bg: #101216;
-  --page-edge: #232733;
-  --field-bg: #141821;
-  --btn-bg: #262b38;
-  --btn-edge: #3a4150;
-  --btn-hover: #323a4d;
-  --ok: #7fd97f;
-  --no: #ff8080;
+  /* 页面窗（设置/历史/编辑/关于）：亮色主题。
+     截图浮层（工具条/放大镜/读数）不受影响，各自用 --tb-* / --bar-* */
+  --page-bg: #f5f6f8;
+  --page-fg: #1f2329;
+  --page-muted: #6b7280;
+  --page-edge: #dcdfe4;
+  --field-bg: #ffffff;
+  --field-fg: #1f2329;
+  --btn-bg: #eceef1;
+  --btn-fg: #2a2f37;
+  --btn-edge: #d0d4da;
+  --btn-hover: #e0e3e8;
+  --ok: #1a7f37;
+  --no: #c62828;
 }
 
 * { box-sizing: border-box; margin: 0; }
@@ -54,11 +59,11 @@ html, body {
 }
 
 body.settings,
-body.history { background: var(--page-bg); }
+body.history { background: var(--page-bg); color: var(--page-fg); }
 
-body.editor { background: #1a1d24; }
+body.editor { background: #e9ebef; color: var(--page-fg); }
 
-body.about { background: var(--page-bg); overflow: hidden; }
+body.about { background: var(--page-bg); color: var(--page-fg); overflow: hidden; }
 
 /* ---------- 关于窗 ---------- */
 .about-card {
@@ -73,12 +78,12 @@ body.about { background: var(--page-bg); overflow: hidden; }
 }
 .about-card svg { width: 56px; height: 56px; flex: none; border-radius: 16px; }
 .about-name { font-size: 18px; font-weight: 600; margin-top: 10px; }
-.about-ver { font-size: 12px; color: var(--bar-muted); margin-bottom: 12px; }
+.about-ver { font-size: 12px; color: var(--page-muted); margin-bottom: 12px; }
 .about-keys { width: 100%; max-width: 280px; display: flex; flex-direction: column; gap: 6px; }
 .about-keys .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; }
-.about-keys .hk-label { color: var(--bar-muted); }
-.about-keys code { background: var(--field-bg); color: var(--bar-fg); padding: 2px 8px; border-radius: 5px; }
-.about-foot { margin-top: 16px; font-size: 11px; color: #5b6472; }
+.about-keys .hk-label { color: var(--page-muted); }
+.about-keys code { background: var(--field-bg); color: var(--field-fg); border: 1px solid var(--page-edge); padding: 2px 8px; border-radius: 5px; }
+.about-foot { margin-top: 16px; font-size: 11px; color: var(--page-muted); }
 
 body.settings { overflow: auto; padding: 0 18px 24px; }
 body.history { overflow: auto; padding: 0 18px 24px; }
@@ -94,7 +99,7 @@ body.settings h1,
 body.history h1 { font-size: 16px; font-weight: 600; }
 
 body.settings h2,
-body.history h2 { font-size: 13px; margin: 10px 0 6px; color: var(--bar-muted); }
+body.history h2 { font-size: 13px; margin: 10px 0 6px; color: var(--page-muted); }
 
 body.settings section,
 body.history section { border-top: 1px solid var(--page-edge); padding: 6px 0; }
@@ -105,7 +110,7 @@ body.history .row { display: flex; align-items: center; gap: 10px; margin: 6px 0
 body.settings button,
 body.history button {
   background: var(--btn-bg);
-  color: var(--bar-fg);
+  color: var(--btn-fg);
   border: 1px solid var(--btn-edge);
   border-radius: var(--bar-radius);
   padding: 5px 12px;
@@ -118,7 +123,7 @@ body.history button:hover { background: var(--btn-hover); }
 body.settings input[type="number"] {
   width: 90px;
   background: var(--field-bg);
-  color: var(--bar-fg);
+  color: var(--field-fg);
   border: 1px solid var(--btn-edge);
   border-radius: 5px;
   padding: 3px 6px;
@@ -126,14 +131,16 @@ body.settings input[type="number"] {
 
 body.settings code {
   background: var(--field-bg);
+  color: var(--field-fg);
+  border: 1px solid var(--page-edge);
   padding: 2px 8px;
   border-radius: 5px;
 }
 
 .err { color: var(--no); }
-.hint { color: #7d8796; margin-top: 14px; }
-.hk-label { min-width: 150px; color: var(--bar-muted); }
-.hint-inline { font-size: 11px; color: #7d8796; }
+.hint { color: var(--page-muted); margin-top: 14px; }
+.hk-label { min-width: 150px; color: var(--page-muted); }
+.hint-inline { font-size: 11px; color: var(--page-muted); }
 .perm-ok { color: var(--ok); }
 .perm-no { color: var(--no); }
 
@@ -145,25 +152,27 @@ body.settings code {
 }
 
 .card {
-  background: #161a22;
+  background: #ffffff;
   border: 1px solid var(--page-edge);
   border-radius: 8px;
   overflow: hidden;
   cursor: pointer;
 }
 
+.card:hover { border-color: var(--tb-on-fg); }
+
 .card img {
   width: 100%;
   height: 120px;
   object-fit: contain;
-  background: #0b0d11;
+  background: #eef0f3;
   display: block;
 }
 
 .card .meta {
   padding: 6px 8px;
   font-size: 11px;
-  color: var(--bar-muted);
+  color: var(--page-muted);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -180,9 +189,10 @@ body.settings code {
   display: flex;
   gap: 2px;
   padding: 3px;
-  background: var(--bar-bg);
-  border: 1px solid var(--bar-border);
+  background: var(--tb-bg);
+  border: 1px solid var(--tb-edge);
   border-radius: var(--bar-radius);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
   opacity: 0;
   transform: translateY(4px);
   transition: opacity 120ms ease, transform 120ms ease;
@@ -204,10 +214,10 @@ body.settings code {
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: var(--bar-fg);
+  color: var(--tb-fg);
 }
 
-.card-acts button:hover { background: var(--bar-hover); }
+.card-acts button:hover { background: var(--tb-hover); color: var(--tb-fg-strong); }
 .card .meta .acts { display: flex; gap: 4px; }
 
 .card .meta button {
