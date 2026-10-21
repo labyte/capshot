@@ -220,9 +220,22 @@ export class OverlayController {
     }
     this.measureLayout();
     this.bind();
+    // 关键：loadFrame 必须自己置 dirty。loop() 是 `if (dirty) draw`，
+    // 而 dirty 初始为 false、只有指针/键盘事件才 mark() —— 不补这一下，
+    // reveal() 会在"一帧都没画"的画布上执行，首帧之前什么都看不见。
+    this.mark();
     this.loop();
     return true;
   }
+
+  /** 等到第一帧真正画上再 reveal；页面用它替代"猜一个 rAF" */
+  firstFrame(): Promise<void> {
+    if (this.paintedOnce) return Promise.resolve();
+    return new Promise((res) => this.paintWaiters.push(res));
+  }
+
+  private paintedOnce = false;
+  private paintWaiters: Array<() => void> = [];
 
   private measureLayout(): void {
     const r = this.canvas.getBoundingClientRect();
@@ -280,14 +293,25 @@ export class OverlayController {
     this.dirty = true;
   }
 
-  private loop(): void {
+  /**
+   * 必须是箭头属性而不是普通方法：`requestAnimationFrame(this.loop)` 传的是未绑定的
+   * 方法引用，ESM 严格模式里回调的 this 是 undefined，第一跳就在 this.disposed 上抛，
+   * 而重新排帧那一行永远执行不到 —— 绘制循环一帧都没画就死掉。
+   * try/catch 同理：draw() 抛异常不能带走整个循环。
+   */
+  private loop = (): void => {
     if (this.disposed) return;
     if (this.dirty) {
       this.dirty = false;
-      this.draw();
+      try {
+        this.draw();
+      } catch (e) {
+        console.error("overlay draw failed", e);
+        this.store.set({ error: "绘制失败：" + String((e as Error)?.message ?? e) });
+      }
     }
     this.raf = requestAnimationFrame(this.loop);
-  }
+  };
 
   private draw(): void {
     if (!this.frame) return;
@@ -315,6 +339,12 @@ export class OverlayController {
       },
     );
     this.publishFrameInfo();
+    if (!this.paintedOnce) {
+      this.paintedOnce = true;
+      const waiting = this.paintWaiters;
+      this.paintWaiters = [];
+      waiting.forEach((res) => res());
+    }
   }
 
   private publishFrameInfo(): void {

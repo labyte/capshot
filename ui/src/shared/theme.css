@@ -28,22 +28,22 @@
 
 * { box-sizing: border-box; margin: 0; }
 
+/* 底色默认透明：overlay/pin 是透明窗，html 元素才是实际画布底 ——
+   只在 body.overlay 上设透明是不够的，html 留深色的话一旦首帧没画上就是一块黑屏糊住桌面。
+   不透明底色改为按页面 class 显式声明。 */
 html, body {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  /* 浮层窗必须透明，页面窗必须不透明 —— 按 body class 分作用域，
-     不能一刀切，否则设置窗会变玻璃 */
-  background: var(--page-bg);
+  background: transparent;
   color: var(--bar-fg);
   font: 13px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
   user-select: none;
   -webkit-user-select: none;
 }
 
-/* overlay / pin 是透明窗；editor 是带标题栏的不透明窗，不能混进这一组 */
-body.overlay,
-body.pin { background: transparent; }
+body.settings,
+body.history { background: var(--page-bg); }
 
 body.editor { background: #1a1d24; }
 

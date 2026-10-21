@@ -41,8 +41,9 @@ export default function OverlayPage() {
         await c.cancel();
         return;
       }
-      // 等一帧确保冻结帧已画上，再一次性 show —— 不留空窗
-      await new Promise((r) => requestAnimationFrame(() => r(null)));
+      // 等**第一帧真的画上**再 show —— 不是"等一个 rAF"：那样可能抢在绘制之前显示，
+      // 用户看到的就是一整块空画布（黑屏）。
+      await c.firstFrame();
       await c.reveal();
       flash(b.settings.flashMs);
     })().catch(async (e) => {
