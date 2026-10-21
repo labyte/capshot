@@ -58,12 +58,34 @@ body.history { background: var(--page-bg); }
 
 body.editor { background: #1a1d24; }
 
+body.about { background: var(--page-bg); overflow: hidden; }
+
+/* ---------- 关于窗 ---------- */
+.about-card {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 20px;
+  text-align: center;
+}
+.about-card svg { width: 56px; height: 56px; flex: none; border-radius: 16px; }
+.about-name { font-size: 18px; font-weight: 600; margin-top: 10px; }
+.about-ver { font-size: 12px; color: var(--bar-muted); margin-bottom: 12px; }
+.about-keys { width: 100%; max-width: 280px; display: flex; flex-direction: column; gap: 6px; }
+.about-keys .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; }
+.about-keys .hk-label { color: var(--bar-muted); }
+.about-keys code { background: var(--field-bg); color: var(--bar-fg); padding: 2px 8px; border-radius: 5px; }
+.about-foot { margin-top: 16px; font-size: 11px; color: #5b6472; }
+
 body.settings { overflow: auto; padding: 0 18px 24px; }
 body.history { overflow: auto; padding: 0 18px 24px; }
 
 /* ---------- 页面窗（设置 / 历史）----------
    裸元素选择器一律限定在 body.settings / body.history 之下：
-   写在全局会渗进截图与贴图的浮层按钮，和 .snip-btn / .pin-bar button 打起来 */
+   写在全局会渗进截图浮层的 .snip-btn 等按钮打起来 */
 
 body.settings header,
 body.history header { display: flex; align-items: center; gap: 12px; padding: 12px 0; }
@@ -249,8 +271,8 @@ body.settings code {
 .snip-btn:hover { background: var(--tb-hover); color: var(--tb-fg-strong); }
 .snip-btn:disabled { opacity: 0.3; cursor: default; }
 .snip-btn.on { background: var(--tb-on-bg); color: var(--tb-on-fg); }
-.snip-btn.accent { color: var(--tb-on-fg); }
-.snip-btn.accent:hover { background: var(--tb-on-bg); color: var(--tb-on-fg); }
+/* 画笔的激活态：中性灰底提亮图标，不用蓝色药丸 */
+.snip-btn.on-soft { background: var(--tb-hover); color: var(--tb-fg-strong); }
 .snip-btn.danger:hover { background: #f7d6d3; color: #cf3b32; }
 
 .snip-sep {
@@ -332,7 +354,7 @@ body.settings code {
   );
 }
 
-.snip-astyle { width: 84px; }
+.snip-astyle { width: 64px; font-size: 14px; text-align: center; }
 
 .snip-chip {
   height: 22px;
@@ -528,46 +550,7 @@ body.pin:active { cursor: grabbing; }
   filter: drop-shadow(0 2px 10px rgba(76, 159, 245, 0.5));
 }
 
-.pin-bar {
-  position: absolute;
-  top: 4px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: none;
-  align-items: center;
-  gap: 2px;
-  background: var(--bar-bg);
-  border: 1px solid var(--bar-border);
-  border-radius: var(--bar-radius);
-  padding: 2px 4px;
-  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.35);
-}
-
-.pin-root:hover .pin-bar { display: flex; }
-
-.pin-bar button {
-  background: transparent;
-  border: 0;
-  color: var(--bar-fg);
-  font-size: 12px;
-  padding: 2px 7px;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.pin-bar button:hover { background: var(--bar-hover); }
-
-.pin-zoom {
-  font: var(--label-font);
-  color: var(--bar-muted);
-  padding: 0 6px;
-}
-
-.pin-sep {
-  width: 1px;
-  height: 14px;
-  background: rgba(255, 255, 255, 0.14);
-}
+/* 贴图悬浮操作栏（.pin-bar）已移除：功能全部收进右键菜单与快捷键 */
 
 .pin-bubble {
   position: absolute;

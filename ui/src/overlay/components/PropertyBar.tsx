@@ -142,16 +142,27 @@ export default function PropertyBar({
           </>
         )}
 
-        {/* 箭头：单端 → / 双端 ↔ */}
+        {/* 箭头样式：一个下拉三选项，纯符号无文字。选「无头/单/双」同时定死头部=实心
+            （hollow 仍能被渲染，兼容历史数据，只是不再提供入口） */}
         {t === "arrow" && (
           <select
             className="snip-select snip-astyle"
             title="箭头样式"
-            value={p.arrowDouble ? "d" : "s"}
-            onChange={(e) => ctrl.setProps({ arrowDouble: e.target.value === "d" })}
+            value={p.arrowHead === "none" ? "none" : p.arrowDouble ? "double" : "single"}
+            onChange={(e) => {
+              const v = e.target.value;
+              ctrl.setProps(
+                v === "none"
+                  ? { arrowHead: "none", arrowDouble: false }
+                  : v === "double"
+                    ? { arrowHead: "solid", arrowDouble: true }
+                    : { arrowHead: "solid", arrowDouble: false },
+              );
+            }}
           >
-            <option value="s">→ 单端</option>
-            <option value="d">↔ 双端</option>
+            <option value="none" title="无箭头直线">—</option>
+            <option value="single" title="单箭头">→</option>
+            <option value="double" title="双箭头">↔</option>
           </select>
         )}
 

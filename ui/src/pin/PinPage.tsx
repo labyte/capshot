@@ -462,17 +462,8 @@ export default function PinPage() {
         />
       </div>
 
-      <div className="pin-bar" onPointerDown={(e) => e.stopPropagation()}>
-        <span className="pin-zoom">{Math.round(zoom * 100)}%</span>
-        <span className="pin-sep" />
-        <button onClick={() => void exportOp("copy")}>复制</button>
-        <button onClick={() => void exportOp("save")}>存图</button>
-        <button onClick={() => void toggleThumb()} title="缩略图模式 (Shift+双击)">
-          缩略
-        </button>
-        <button onClick={() => void getCurrentWindow().close()}>关闭</button>
-      </div>
-
+      {/* 悬浮操作栏已移除：复制/存图/缩略/关闭全走右键菜单与快捷键
+          （Ctrl+C / Ctrl+S / Shift+双击 / Esc），鼠标移入不再弹条 */}
       {bubble && <div className="pin-bubble">{bubble}</div>}
     </div>
   );

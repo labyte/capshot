@@ -113,7 +113,7 @@ export function propsOf(s: Shape): Partial<DrawProps> {
     case "mosaic":
       return { mosaicStyle: s.style, mosaicLevel: s.level };
     case "arrow":
-      return { color: s.color, width: s.width, arrowDouble: s.double ?? false };
+      return { color: s.color, width: s.width, arrowDouble: s.double ?? false, arrowHead: s.head ?? "solid" };
     case "text":
       return {
         color: s.color,

@@ -54,11 +54,11 @@ jobs:
           if (-not (Test-Path pkg/probe.exe)) { Copy-Item target/release/examples/probe.exe pkg/ }
           Copy-Item tools/win-x64/WebView2Loader.dll pkg/
           Copy-Item docs/testing-windows.md pkg/README-test.md
-          Compress-Archive -Path pkg/* -DestinationPath capshot-win-x64.zip
+          Compress-Archive -Path pkg/* -DestinationPath "capshot-win-x64-$env:GITHUB_REF_NAME.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: capshot-win-x64
-          path: capshot-win-x64.zip
+          path: capshot-win-x64-*.zip
 
   build-macos:
     runs-on: macos-14
@@ -88,12 +88,12 @@ jobs:
           chmod +x scripts/make-app.sh
           ./scripts/make-app.sh target/release/capshot dist/capshot.app
           cp target/release/examples/probe dist/probe
-          zip -r capshot-macos-arm64.zip dist/capshot.app dist/probe docs/testing-windows.md
+          zip -r "capshot-macos-arm64-${GITHUB_REF_NAME}.zip" dist/capshot.app dist/probe docs/testing-windows.md
 
       - uses: actions/upload-artifact@v4
         with:
           name: capshot-macos-arm64
-          path: capshot-macos-arm64.zip
+          path: capshot-macos-arm64-*.zip
 
   release:
     needs: [build-windows, build-macos]
@@ -105,8 +105,9 @@ jobs:
           merge-multiple: true
       - name: Create Release
         run: |
+          # 产物文件名带版本号（tag 名），glob 匹配两个平台的 zip
           gh release create "${GITHUB_REF_NAME}" \
-            capshot-win-x64.zip capshot-macos-arm64.zip \
+            capshot-*-"${GITHUB_REF_NAME}".zip \
             --title "capshot ${GITHUB_REF_NAME}" \
             --generate-notes
         env:

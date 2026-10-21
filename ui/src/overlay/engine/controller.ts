@@ -27,7 +27,7 @@ import type { BootCtx, BootOverlay, SnapshotDto } from "../../shared/types";
 
 export const ACCENT = "#4c9ff5";
 const MASK_ALPHA = 0.5;
-/** 折线/马克笔的落点抽稀阈值（物理 px），不抽稀一次拖拽会攒几千个点 */
+/** 画笔/马克笔的落点抽稀阈值（物理 px），不抽稀一次拖拽会攒几千个点 */
 const MIN_POINT_DIST = 3;
 
 export type Op = "copy" | "save" | "pin" | "copySave";
@@ -999,7 +999,14 @@ export class OverlayController {
         level: props.mosaicLevel,
       };
     } else if (kind === "arrow") {
-      shape = { ...base, kind: "arrow", a: { ...p }, b: { ...p }, double: props.arrowDouble };
+      shape = {
+        ...base,
+        kind: "arrow",
+        a: { ...p },
+        b: { ...p },
+        double: props.arrowDouble,
+        head: props.arrowHead,
+      };
     } else if (kind === "polyline" || kind === "marker") {
       shape = { ...base, kind, pts: [{ ...p }] };
     } else {

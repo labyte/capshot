@@ -34,10 +34,20 @@ export function layoutChrome(ctrl: OverlayController, refs: ChromeRefs) {
   if (refs.sizeLabel) {
     const r = i.sel;
     if (r && (i.phase === "drawing" || i.phase === "adjusting")) {
-      refs.sizeLabel.textContent = `${Math.round(r.w)} × ${Math.round(r.h)}`;
-      const anchorP = i.phase === "drawing" && i.pointer ? toCss(i.pointer) : toCss({ x: r.x + r.w, y: r.y + r.h });
-      refs.sizeLabel.style.left = px(anchorP.left + (i.phase === "drawing" ? 14 : -6));
-      refs.sizeLabel.style.top = px(anchorP.top + (i.phase === "drawing" ? 12 : 6));
+      refs.sizeLabel.textContent = `${Math.round(r.w)} × ${Math.round(r.h)} px`;
+      if (i.phase === "drawing" && i.pointer) {
+        // 拖框中贴着光标走：此时工具条隐藏，没有遮挡问题，读数跟着视线最自然
+        const p = toCss(i.pointer);
+        refs.sizeLabel.style.left = px(p.left + 14);
+        refs.sizeLabel.style.top = px(p.top + 12);
+      } else {
+        // 定框后钉在选区左上角上方（原先在右下角，正好被选区下方的工具条盖住）；
+        // 贴屏幕顶边放不下时翻进选区内侧
+        const p = toCss({ x: r.x, y: r.y });
+        const lh = refs.sizeLabel.offsetHeight || 20;
+        refs.sizeLabel.style.left = px(p.left);
+        refs.sizeLabel.style.top = px(p.top - lh - 4 >= 2 ? p.top - lh - 4 : p.top + 6);
+      }
       refs.sizeLabel.style.display = "block";
     } else {
       refs.sizeLabel.style.display = "none";

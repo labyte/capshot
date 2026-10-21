@@ -25,12 +25,16 @@ export interface RectShape extends BaseShape {
   filled: boolean;
 }
 
+export type ArrowHead = "solid" | "hollow" | "none";
+
 export interface ArrowShape extends BaseShape {
   kind: "arrow";
   a: Point;
   b: Point;
   /** 双向箭头（属性栏的 →/↔ 选择）。旧数据缺省 = 单向 */
   double?: boolean;
+  /** 箭头头部样式：实心三角 / 空心 V / 无头直线。旧数据缺省 = solid */
+  head?: ArrowHead;
 }
 
 export interface PathShape extends BaseShape {
@@ -86,6 +90,8 @@ export interface DrawProps {
   textFamily: string;
   /** 箭头：true = 两端箭头（↔），false = 单端（→） */
   arrowDouble: boolean;
+  /** 箭头头部样式（与单/双端正交） */
+  arrowHead: ArrowHead;
   mosaicStyle: "pixel" | "blur";
   mosaicLevel: number;
   stepNo: number;
@@ -120,6 +126,7 @@ export const DEFAULT_PROPS: DrawProps = {
   textStrike: false,
   textFamily: "Microsoft YaHei UI",
   arrowDouble: false,
+  arrowHead: "solid",
   mosaicStyle: "pixel",
   mosaicLevel: 8,
   stepNo: 1,

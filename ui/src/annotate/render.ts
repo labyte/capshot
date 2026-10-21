@@ -1,7 +1,7 @@
 //! 图形绘制。clip = 选区（标注只在选区内可见并参与导出），与迁移前 drawShapes 的裁剪语义一致。
 
 import { drawBlocked, drawBlurred } from "./mosaic";
-import type { Shape } from "./model";
+import type { ArrowHead, Shape } from "./model";
 import type { Rect } from "../overlay/engine/types";
 
 export interface RenderDeps {
@@ -40,7 +40,7 @@ export function drawShape(c: CanvasRenderingContext2D, s: Shape, deps: RenderDep
       break;
     }
     case "arrow": {
-      drawArrow(c, s.a.x, s.a.y, s.b.x, s.b.y, s.color, s.width, deps.scale, s.double ?? false);
+      drawArrow(c, s.a.x, s.a.y, s.b.x, s.b.y, s.color, s.width, deps.scale, s.double ?? false, s.head ?? "solid");
       break;
     }
     case "polyline":
@@ -119,20 +119,36 @@ export function drawArrow(
   width: number,
   scale: number,
   double = false,
+  headStyle: ArrowHead = "solid",
 ): void {
   const ang = Math.atan2(y2 - y1, x2 - x1);
   const head = Math.max(10 * scale, width * 3);
   const tip = (tx: number, ty: number, a: number) => {
+    if (headStyle === "none") return;
+    const lx = tx - head * Math.cos(a - 0.5),
+      ly = ty - head * Math.sin(a - 0.5);
+    const rx = tx - head * Math.cos(a + 0.5),
+      ry = ty - head * Math.sin(a + 0.5);
+    if (headStyle === "hollow") {
+      // 空心：只描两条边，靠 lineJoin 出尖角
+      c.beginPath();
+      c.moveTo(lx, ly);
+      c.lineTo(tx, ty);
+      c.lineTo(rx, ry);
+      c.stroke();
+      return;
+    }
     c.beginPath();
     c.moveTo(tx, ty);
-    c.lineTo(tx - head * Math.cos(a - 0.5), ty - head * Math.sin(a - 0.5));
-    c.lineTo(tx - head * Math.cos(a + 0.5), ty - head * Math.sin(a + 0.5));
+    c.lineTo(lx, ly);
+    c.lineTo(rx, ry);
     c.closePath();
     c.fill();
   };
   c.strokeStyle = c.fillStyle = color;
   c.lineWidth = width;
   c.lineCap = "round";
+  c.lineJoin = "round";
   c.beginPath();
   c.moveTo(x1, y1);
   c.lineTo(x2, y2);

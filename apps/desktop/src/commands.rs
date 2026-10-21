@@ -374,7 +374,7 @@ pub fn export_core(app: &AppHandle, req: &ExportReq, state: &AppState) -> Result
         if let Err(e) = app
             .notification()
             .builder()
-            .title("capshot 已保存")
+            .title("CapsShot 已保存")
             .body(path.display().to_string())
             .show()
         {
@@ -628,8 +628,35 @@ pub fn set_settings(app: AppHandle, patch: SettingsPatch, state: State<'_, AppSt
         s.autostart = auto;
     }
     state.save_settings();
+    if hotkey_changed {
+        // 托盘 tooltip 里带着截图/贴图快捷键，改键后必须同步
+        crate::refresh_tray_tooltip(&app);
+    }
     out["settings"] = serde_json::to_value(state.settings.lock().unwrap().clone()).unwrap_or_default();
     Ok(out)
+}
+
+/// 关于窗口：定尺寸信息卡，展示软件名 / 版本 / 快捷键。
+#[tauri::command]
+pub fn open_about_window(app: AppHandle) -> Result<(), ApiError> {
+    windows::open_simple(&app, "about", "about.html", 380.0, 400.0)
+        .map_err(|e| ApiError { code: "platform_error", message: e.to_string() })
+}
+
+/// 关于页数据。version 取 tauri.conf.json 的 package_info（与 bundle 一致）。
+#[tauri::command]
+pub fn about_info(app: AppHandle, state: State<'_, AppState>) -> serde_json::Value {
+    let (snip, pin, hide) = {
+        let s = state.settings.lock().unwrap();
+        (s.hotkey.clone(), s.hotkey_pin.clone(), s.hotkey_hide_pins.clone())
+    };
+    serde_json::json!({
+        "name": "CapsShot",
+        "version": app.package_info().version.to_string(),
+        "hotkey": snip,
+        "hotkeyPin": pin,
+        "hotkeyHidePins": hide,
+    })
 }
 
 /// 钉图窗口当前物理几何（前端缩放锚点用）。

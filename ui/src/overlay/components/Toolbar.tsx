@@ -13,7 +13,7 @@ import {
   IconMarker,
   IconMosaic,
   IconPin,
-  IconPolyline,
+  IconPen,
   IconRect,
   IconRedo,
   IconSave,
@@ -23,10 +23,11 @@ import {
   IconUndo,
 } from "../../shared/icons";
 
-const TOOLS: { id: ToolId; label: string; key: string; Icon: typeof IconRect }[] = [
+/** soft = 激活时中性灰底（不带蓝色药丸）：画笔按需求去蓝 */
+const TOOLS: { id: ToolId; label: string; key: string; Icon: typeof IconRect; soft?: boolean }[] = [
   { id: "rect", label: "形状", key: "V", Icon: IconShapes },
   { id: "arrow", label: "箭头", key: "P", Icon: IconArrow },
-  { id: "polyline", label: "折线", key: "L", Icon: IconPolyline },
+  { id: "polyline", label: "画笔", key: "L", Icon: IconPen, soft: true },
   { id: "marker", label: "马克笔", key: "M", Icon: IconMarker },
   { id: "text", label: "文字", key: "T", Icon: IconText },
   { id: "mosaic", label: "马赛克", key: "X", Icon: IconMosaic },
@@ -59,7 +60,7 @@ export default function Toolbar({
       onPointerDown={(e) => e.stopPropagation()}
     >
       <div className="snip-bar-row">
-        {TOOLS.map(({ id, label, key, Icon }) => {
+        {TOOLS.map(({ id, label, key, Icon, soft }) => {
           // 形状按钮：矩形⇄椭圆合并为一个按钮（叠加图标），点击在两者间 toggle，
           // title 随当前子工具变化；具体选哪种在下方属性栏的 □ ○ 里切
           if (id === "rect") {
@@ -80,7 +81,7 @@ export default function Toolbar({
           return (
             <button
               key={id}
-              className={"snip-btn" + (s.tool === id ? " on" : "")}
+              className={"snip-btn" + (s.tool === id ? (soft ? " on-soft" : " on") : "")}
               title={`${label} (${key})`}
               onClick={act(() => ctrl.setTool(s.tool === id ? null : id))}
             >
@@ -106,7 +107,7 @@ export default function Toolbar({
           <IconRedo />
         </button>
         <span className="snip-sep" />
-        <button className="snip-btn accent" title="贴图 (Ctrl+T / 中键)" onClick={act(() => void ctrl.run("pin"))}>
+        <button className="snip-btn" title="贴图 (Ctrl+T / 中键)" onClick={act(() => void ctrl.run("pin"))}>
           <IconPin />
         </button>
         <button className="snip-btn" title="保存 (Ctrl+S)" onClick={act(() => void ctrl.run("save"))}>

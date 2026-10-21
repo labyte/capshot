@@ -8,9 +8,9 @@ import { invoke } from "../shared/ipc";
 import type { HotkeySlot, PermissionStatusDto, SettingsDto } from "../shared/types";
 
 const HOTKEY_SLOTS: { slot: HotkeySlot; label: string; hint: string; clearable?: boolean }[] = [
-  { slot: "hotkey", label: "截图", hint: "Snipaste 习惯用 F1" },
-  { slot: "hotkeyPin", label: "贴图（剪贴板）", hint: "Snipaste 习惯用 F3" },
-  { slot: "hotkeyHidePins", label: "隐藏 / 显示全部贴图", hint: "Snipaste 习惯用 Shift+F3" },
+  { slot: "hotkey", label: "截图", hint: "默认 F1" },
+  { slot: "hotkeyPin", label: "贴图（剪贴板）", hint: "默认 F3" },
+  { slot: "hotkeyHidePins", label: "隐藏 / 显示全部贴图", hint: "默认 Shift+F3" },
   { slot: "hotkeyThrough", label: "贴图鼠标穿透", hint: "默认不绑定；穿透中可从托盘恢复", clearable: true },
 ];
 
@@ -162,7 +162,7 @@ export default function SettingsPage() {
         <h2>快捷键</h2>
         {regErrors.length > 0 && (
           <div className="err">
-            以下快捷键注册失败（多半已被其它程序占用，比如 Snipaste 就占着 F1/F3）：
+            以下快捷键注册失败（多半已被其它程序占用，可改用带修饰键的组合）：
             {regErrors.join("；")}
           </div>
         )}

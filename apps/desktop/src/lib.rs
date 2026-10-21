@@ -104,6 +104,8 @@ pub fn run() {
             commands::hotkey_status,
             commands::open_settings_window,
             commands::open_history_window,
+            commands::open_about_window,
+            commands::about_info,
         ])
         .build(tauri::generate_context!())
         .expect("capshot build failed")
@@ -122,6 +124,25 @@ pub fn run() {
 use tauri::tray::TrayIconBuilder;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 
+/// 托盘悬停提示：软件名 + 换行的截图/贴图快捷键。
+/// 改键后由 commands::set_settings 调 refresh_tray_tooltip 重算。
+pub fn tray_tooltip(app: &tauri::AppHandle) -> String {
+    let (snip, pin) = {
+        let state = app.state::<AppState>();
+        let s = state.settings.lock().unwrap();
+        (s.hotkey.clone(), s.hotkey_pin.clone())
+    };
+    format!("CapsShot\n截图: {snip}\n贴图: {pin}")
+}
+
+/// 把当前 tooltip 推到托盘图标上（改键后刷新）
+pub fn refresh_tray_tooltip(app: &tauri::AppHandle) {
+    let tip = tray_tooltip(app);
+    if let Some(tray) = app.tray_by_id("main") {
+        let _ = tray.set_tooltip(Some(&tip));
+    }
+}
+
 fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let capture = MenuItem::with_id(app, "capture", "截图", true, None::<&str>)?;
     let clip = MenuItem::with_id(app, "pin_clip", "贴图剪贴板", true, None::<&str>)?;
@@ -131,10 +152,12 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let close_pins = MenuItem::with_id(app, "close_pins", "关闭所有贴图", true, None::<&str>)?;
     let history = MenuItem::with_id(app, "history", "历史…", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "设置…", true, None::<&str>)?;
+    let about = MenuItem::with_id(app, "about", "关于", true, None::<&str>)?;
     let sep1 = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let sep3 = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, "quit", "退出 capshot", true, None::<&str>)?;
+    let sep4 = PredefinedMenuItem::separator(app)?;
+    let quit = MenuItem::with_id(app, "quit", "退出 CapsShot", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
         &[
@@ -148,13 +171,15 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             &history,
             &settings,
             &sep3,
+            &about,
+            &sep4,
             &quit,
         ],
     )?;
     TrayIconBuilder::with_id("main")
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .tooltip("capshot")
+        .tooltip(tray_tooltip(app))
         .on_menu_event(|app, event| match event.id().as_ref() {
             "capture" => commands::trigger_capture(app),
             "pin_clip" => {
@@ -172,6 +197,9 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             }
             "settings" => {
                 let _ = commands::open_settings_window(app.clone());
+            }
+            "about" => {
+                let _ = commands::open_about_window(app.clone());
             }
             "quit" => app.exit(0),
             _ => {}

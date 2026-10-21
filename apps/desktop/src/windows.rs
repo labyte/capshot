@@ -137,7 +137,7 @@ pub fn open_editor(app: &AppHandle, sel: u64, img_w: u32, img_h: u32) -> tauri::
         return Ok(label);
     }
     let win = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("editor.html".into()))
-        .title("capshot 重新编辑")
+        .title("CapsShot 重新编辑")
         .inner_size(320.0, 240.0)
         .resizable(true)
         .build()?;
@@ -170,13 +170,20 @@ pub fn open_simple(app: &AppHandle, label: &str, url: &str, w: f64, h: f64) -> t
         let _ = existing.set_focus();
         return Ok(());
     }
-    WebviewWindowBuilder::new(app, label, WebviewUrl::App(url.into()))
-        .title(match label {
-            "settings" => "capshot 设置",
-            _ => "capshot 历史",
-        })
-        .inner_size(w, h)
-        .resizable(true)
-        .build()?;
+    let title = match label {
+        "settings" => "CapsShot 设置",
+        "about" => "关于 CapsShot",
+        _ => "CapsShot 历史",
+    };
+    let mut b = WebviewWindowBuilder::new(app, label, WebviewUrl::App(url.into()))
+        .title(title)
+        .inner_size(w, h);
+    // 关于窗是定尺寸信息卡，不给拉伸；设置/历史仍可调
+    if label == "about" {
+        b = b.resizable(false).maximizable(false).center();
+    } else {
+        b = b.resizable(true);
+    }
+    b.build()?;
     Ok(())
 }
