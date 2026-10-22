@@ -25,11 +25,8 @@ export interface PaintInput {
   accent: string;
   maskAlpha: number;
   handleSize: number;
-  /**
-   * 自绘光标（物理 px，跟随光标），null = 用系统光标。
-   * r 一律是**半径**：ring 画成圈，dotTicks 画成实心圆点 + 四向短线。
-   */
-  brushCursor: { x: number; y: number; r: number; kind: "ring" | "dotTicks" } | null;
+  /** 自绘笔刷圈（物理 px，跟随光标；r=半径），null = 用系统光标 */
+  brushCursor: { x: number; y: number; r: number } | null;
 }
 
 export function paint(
@@ -107,74 +104,36 @@ export function paint(
   // 这时候正是唯一能拖端点的窗口
   i.editPoints.forEach((p, k) => dot(p.x, p.y, i.hotEdit === k ? hs * 1.25 : hs));
 
-  /* 自绘光标（此时系统光标被 controller 置成 none，见 cursorSpec）：
-       ring     = 笔刷圈 + 中心十字 —— 橡皮圆头 / 马赛克线条 / 画笔（§5 圈直径=实际笔刷大小）
-       dotTicks = 圆点 + 四向短线 —— 箭头（§4 圆点大小随线宽实时变化）
-     一律深色打底 + 浅色描边，深浅背景都读得出来。 */
+  /* 自绘笔刷圈（此时系统光标被 controller 置成 none，见 cursorSpec）：
+     橡皮圆头 / 马赛克线条 / 画笔共用。白底 + 深浅双描边任何背景都看得见；
+     中心十字是瞄准点 —— 圈小的时候看不出笔刷究竟落在哪个像素上。 */
   if (i.brushCursor) {
-    const { x, y, r, kind } = i.brushCursor;
-    // 两段式描边：先粗深色当晕影，再细浅色画本体，任何底上都对比得开
-    const stroked = (draw: () => void) => {
-      ctx.save();
-      ctx.lineCap = "round";
-      for (const [col, w] of [
-        ["rgba(0,0,0,0.55)", 3],
-        ["#fff", 1],
-      ] as const) {
-        ctx.strokeStyle = col;
-        ctx.lineWidth = w;
-        draw();
-      }
-      ctx.restore();
-    };
+    const { x, y, r } = i.brushCursor;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,255,255,0.18)";
+    ctx.fill();
+    ctx.lineWidth = Math.max(1.5, r / 12);
+    ctx.strokeStyle = "#fff";
+    ctx.stroke();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(0,0,0,0.5)";
+    ctx.stroke();
 
-    if (kind === "ring") {
+    const arm = Math.max(3, r * 0.35);
+    // 两段式描边：先粗深色当晕影，再细浅色画本体，深浅底上都对比得开
+    for (const [col, w] of [
+      ["rgba(0,0,0,0.55)", 3],
+      ["#fff", 1],
+    ] as const) {
+      ctx.strokeStyle = col;
+      ctx.lineWidth = w;
       ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(255,255,255,0.18)";
-      ctx.fill();
-      ctx.lineWidth = Math.max(1.5, r / 12);
-      ctx.strokeStyle = "#fff";
+      ctx.moveTo(x - arm, y);
+      ctx.lineTo(x + arm, y);
+      ctx.moveTo(x, y - arm);
+      ctx.lineTo(x, y + arm);
       ctx.stroke();
-      ctx.lineWidth = 1;
-      ctx.strokeStyle = "rgba(0,0,0,0.5)";
-      ctx.stroke();
-      // 中心十字：小圈时看不出笔刷究竟落在哪个像素上，靠它瞄准
-      const arm = Math.max(3, r * 0.35);
-      stroked(() => {
-        ctx.beginPath();
-        ctx.moveTo(x - arm, y);
-        ctx.lineTo(x + arm, y);
-        ctx.moveTo(x, y - arm);
-        ctx.lineTo(x, y + arm);
-        ctx.stroke();
-      });
-    } else {
-      const rr = Math.max(1.5, r); // 线宽 1 时也别缩成一个看不见的点
-      // 白实心 + 深色描边：深底上靠白芯显眼，浅底上靠黑边成形。
-      // （原先用近黑实心，实测在深色截图上整颗点融进背景，只剩一圈边）
-      ctx.beginPath();
-      ctx.arc(x, y, rr, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(255,255,255,0.92)";
-      ctx.fill();
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = "rgba(0,0,0,0.72)"; // 浅底上全靠这道边把白点勾出来
-      ctx.stroke();
-      const gap = rr + 2;
-      const tick = Math.max(4, rr * 0.9);
-      stroked(() => {
-        ctx.beginPath();
-        for (const [dx, dy] of [
-          [1, 0],
-          [-1, 0],
-          [0, 1],
-          [0, -1],
-        ] as const) {
-          ctx.moveTo(x + dx * gap, y + dy * gap);
-          ctx.lineTo(x + dx * (gap + tick), y + dy * (gap + tick));
-        }
-        ctx.stroke();
-      });
     }
   }
 }

@@ -362,31 +362,34 @@ export class OverlayController {
   };
 
   /**
-   * 该工具要不要**自绘光标**，以及画哪一种。返回 null = 用系统光标（十字/I 梁/…）。
-   * 自绘时系统光标必须隐藏（见 updateCursor 的 `none` 分支），否则会两个光标叠着。
+   * 该工具要不要**自绘笔刷圈**，要则返回半径（物理 px），不要则返回 null（用系统光标）。
+   * 圈可见时系统光标必须隐藏（见 updateCursor 的 `none` 分支），否则会两个光标叠着。
    *
-   * - `ring` 笔刷圈：橡皮圆头、马赛克线条（§7/§9）、**画笔（§5：圈直径=实际笔刷大小）**
-   *   —— 圈内带中心十字当瞄准点，滚轮即时改圈的大小
-   * - `dotTicks` 圆点 + 四向短线：**箭头（§4：圆点大小随滚轮实时变化）**
+   * 覆盖：橡皮圆头、马赛克线条、**画笔** —— 圈内带中心十字当瞄准点，
+   * 滚轮即时改圈的大小。画笔这条有外部背书：Snipaste 官方包里挖出的 changelog 明文
+   * 「cursor shape not updated when adjusting the **pen size** with mouse wheeling [#1310]」，
+   * 即笔刷类工具的光标随笔刷大小实时变化，是真行为。
+   *
+   * **箭头不在此列（已撤回）**：我们文档 §4 那句「圆点 + 四个方向短线」查无实据 ——
+   * 官方 zip 里没有任何光标图资源（无 .cur/.ani、无 :/…cur… 资源路径），
+   * changelog 只提 pen size 不提箭头，那句是当初凭记忆写进文档的。
+   * 箭头工具回到系统十字，等真值再定。记号笔同理不动（#1310 说的是 pen，未覆盖 marker）。
    */
-  private cursorSpec(): { kind: "ring" | "dotTicks"; r: number } | null {
+  private brushRadius(): number | null {
     const s = this.state;
     if (s.phase !== "adjusting" && s.phase !== "tool-drawing") return null;
     const sc = this.scale;
     const p = s.props;
-    if (s.tool === "eraser" && !p.eraserRect) return { kind: "ring", r: p.eraserRadius * sc };
-    if (s.tool === "mosaic" && p.mosaicMode === "line") {
-      return { kind: "ring", r: (p.mosaicBrush * sc) / 2 };
-    }
-    if (s.tool === "polyline") return { kind: "ring", r: (p.width * sc) / 2 };
-    if (s.tool === "arrow") return { kind: "dotTicks", r: (p.width * sc) / 2 };
+    if (s.tool === "eraser" && !p.eraserRect) return p.eraserRadius * sc;
+    if (s.tool === "mosaic" && p.mosaicMode === "line") return (p.mosaicBrush * sc) / 2;
+    if (s.tool === "polyline") return (p.width * sc) / 2;
     return null;
   }
 
   private draw(): void {
     if (!this.frame) return;
     const s = this.state;
-    const cur = this.cursorSpec();
+    const ring = this.brushRadius();
     const editable = this.editableShape();
     if (!this.reader) {
       // 懒建：放大镜真要读像素才铺一张全幅 CPU 后端画布
@@ -414,7 +417,9 @@ export class OverlayController {
         maskAlpha: MASK_ALPHA,
         handleSize: this.handleSize,
         brushCursor:
-          cur && this.pointer ? { ...cur, x: this.pointer.x, y: this.pointer.y } : null,
+          ring !== null && this.pointer
+            ? { x: this.pointer.x, y: this.pointer.y, r: ring }
+            : null,
       },
     );
     this.publishFrameInfo();
@@ -586,9 +591,9 @@ export class OverlayController {
     else if (a?.mode === "move" || a?.mode === "shape-move" || a?.mode === "shape-edit") c = "move";
     // 压在「刚画完那支」的端点上：此时工具还开着（默认是十字），但这一格该给抓手
     else if (this.hotEdit >= 0) c = "move";
-    // 该工具要自绘光标（笔刷圈 / 圆点短线）时隐藏系统光标，避免两个光标打架；
-    // 矩形模式、形状类工具仍用十字
-    else if (this.cursorSpec()) c = "none";
+    // 该工具要自绘笔刷圈（橡皮圆头 / 马赛克线条 / 画笔）时隐藏系统光标，
+    // 避免圈+十字双光标打架；矩形模式、形状类工具仍用十字
+    else if (this.brushRadius() !== null) c = "none";
     else if (s.pendingTextAt) c = "text";
     else if (s.phase === "adjusting" && !s.tool && p) {
       if (this.hotHandle) c = CURSOR_FOR_HANDLE[this.hotHandle];
