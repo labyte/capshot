@@ -344,6 +344,7 @@ cmd / PowerShell 里运行：
 | 44 | 记号笔光标 | **实心圆**（不是空心环） | `toolCursor()` 新增 `dot` 分支：半透明当前色实心 + 一圈实边（与它画的高亮同观感），直径仍 ~15px 固定 |
 | 45 | 文字工具光标 | 定位时就该是输入光标（I 梁） | `updateCursor` 把 `s.tool === "text"` 与 `pendingTextAt` 并列给 `text`，不再走自绘十字 |
 | 46 | 马赛克光标 | **实心 + 虚线边** | `toolCursor()` 新增 `dashDot` 分支：中性灰实心 + 白晕/深虚线双描边（打码不涉及颜色），环径仍随笔刷 8–80 实时变 |
+| 48 | 工具条按钮光标 | 点工具条上的按钮时用**普通箭头**，不是手型 | `.snip-btn` / `.snip-color` / `.snip-swatch` / `.snip-range` / `.snip-chip` / `.snip-select` 的 `cursor: pointer` 全部改 `default`（只动 `.snip-*` 作用域，设置页/历史页的按钮仍是手型） |
 | 47 | 橡皮擦光标 | 描边（圆头）模式=描边圆，否则=十字 | **已是此行为**：`eraser && !eraserRect` → `ring`；矩形模式无自绘光标 → 落回细十字。此处只把规则钉死 |
 | 40 | **取色态光标消失** | 自己引入的 bug | 十字改成自绘后，`paint()` 在 picking / 无选区两种情况下提前 `return`，而光标层画在函数末尾 → 系统光标已被置 `none`、自绘的又没画，指针整个不见。修法：光标层拆成 `paintCursor()` 由 `draw()` 在 `paint()` 之后无条件调用 |
 | 41 | 手柄区光标互斥 | 移入手柄/句柄区域只给选择光标，不要和绘制光标同屏 | `updateCursor` 把 `hotEdit`/`hotHandle` 两判提到 `toolCursor()` 之前；`draw()` 里 `grabHandle` 为真时 `toolCursor`/`cross` 一律传 null |

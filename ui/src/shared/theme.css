@@ -294,7 +294,7 @@ body.settings code {
   color: var(--tb-ink);
   border: 0;
   border-radius: 0;
-  cursor: pointer;
+  cursor: default;
   padding: 0;
   flex: none;
 }
@@ -337,7 +337,7 @@ body.settings code {
   overflow: hidden;
   border: 1px solid #222222;
   flex: none;
-  cursor: pointer;
+  cursor: default;
   margin: 0 4px;
 }
 
@@ -347,7 +347,7 @@ body.settings code {
   margin: -5px;
   border: 0;
   padding: 0;
-  cursor: pointer;
+  cursor: default;
   background: none;
 }
 
@@ -367,7 +367,7 @@ body.settings code {
   height: 11px;
   border-radius: 1px;
   border: 1px solid rgba(0, 0, 0, 0.35);
-  cursor: pointer;
+  cursor: default;
   padding: 0;
   flex: none;
 }
@@ -452,7 +452,7 @@ body.settings code {
   height: 24px;
   margin: 0 2px;
   accent-color: var(--tb-accent);
-  cursor: pointer;
+  cursor: default;
   background: transparent;
 }
 
@@ -474,7 +474,7 @@ body.settings code {
   color: var(--tb-muted);
   border: 1px solid var(--tb-edge);
   border-radius: 2px;
-  cursor: pointer;
+  cursor: default;
   font-size: 12px;
 }
 
@@ -502,7 +502,7 @@ body.settings code {
   border-radius: 2px;
   font-size: 12px;
   padding: 0 4px;
-  cursor: pointer;
+  cursor: default;
 }
 .snip-select:focus { outline: 1px solid var(--tb-accent); }
 .snip-size { width: 56px; }
