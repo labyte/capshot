@@ -78,14 +78,19 @@ export function layoutChrome(ctrl: OverlayController, refs: ChromeRefs) {
       if (refs.loupeCanvas && frame) {
         paintLoupe(refs.loupeCanvas, frame, i.pointer.x, i.pointer.y);
       }
+      // 坐标行 (x , y)：虚拟屏绝对坐标，对齐 Snipaste 放大镜
+      if (refs.loupeCoords && i.virtualPointer) {
+        refs.loupeCoords.textContent = `(${i.virtualPointer.x} , ${i.virtualPointer.y})`;
+      }
       const hex = i.hex;
-      const rgb = `rgb(${i.color.join(",")})`;
-      const text = s.loupeFormat === "hex" ? hex : rgb;
+      // 色值：RGB 用「r, g, b」（无 rgb() 包裹），HEX 用大写 #RRGGBB
+      const rgb = i.color.join(", ");
+      const text = s.loupeFormat === "hex" ? hex.toUpperCase() : rgb;
       if (refs.loupeInfo) {
         const chip = refs.loupeInfo.querySelector(".snip-loupe-chip") as HTMLElement | null;
         const label = refs.loupeInfo.querySelector(".snip-loupe-text") as HTMLElement | null;
         if (chip) chip.style.background = hex;
-        if (label) label.textContent = `${text}  (${s.loupeFormat === "hex" ? "HEX" : "RGB"})`;
+        if (label) label.textContent = text;
       }
     } else if (refs.loupe) {
       refs.loupe.style.display = "none";
@@ -101,8 +106,9 @@ export function layoutChrome(ctrl: OverlayController, refs: ChromeRefs) {
     const selRight = selLeft + r.w * k;
     const selTop = i.cssOrigin.y + r.y * k;
     const selBottom = selTop + r.h * k;
-    const barW = bar.offsetWidth || 300;
-    const totalH = (bar.offsetHeight || 34) + (propsEl ? (propsEl.offsetHeight || 30) + 4 : 0);
+    // 兜底值只在首帧未测量时用到：格 32×32、工具条 14 格 + 2 个 6px 分隔槽 = 460
+    const barW = bar.offsetWidth || 460;
+    const totalH = (bar.offsetHeight || 34) + (propsEl ? (propsEl.offsetHeight || 34) + 4 : 0);
 
     let top = selBottom + GAP;
     if (top + totalH > i.winH - 4) top = Math.max(4, selTop - GAP - totalH);

@@ -1,7 +1,8 @@
 //! 图形绘制。clip = 选区（标注只在选区内可见并参与导出），与迁移前 drawShapes 的裁剪语义一致。
 
 import { drawBlocked, drawBlurred } from "./mosaic";
-import type { ArrowHead, Shape } from "./model";
+import { shapeBounds } from "./model";
+import type { ArrowHead, EraseShape, Shape } from "./model";
 import type { Rect } from "../overlay/engine/types";
 
 export interface RenderDeps {
@@ -16,6 +17,15 @@ const FONT_STACK = '-apple-system, "Segoe UI", "Microsoft YaHei", sans-serif';
 export function drawShape(c: CanvasRenderingContext2D, s: Shape, deps: RenderDeps): void {
   switch (s.kind) {
     case "rect": {
+      // 记号笔矩形：半透明高亮框，无描边
+      if (s.marker) {
+        c.save();
+        c.globalAlpha = 0.35;
+        c.fillStyle = s.color;
+        c.fillRect(s.r.x, s.r.y, s.r.w, s.r.h);
+        c.restore();
+        break;
+      }
       c.strokeStyle = c.fillStyle = s.color;
       c.lineWidth = s.width;
       if (s.filled) c.fillRect(s.r.x, s.r.y, s.r.w, s.r.h);
@@ -48,11 +58,17 @@ export function drawShape(c: CanvasRenderingContext2D, s: Shape, deps: RenderDep
       if (s.pts.length < 2) break;
       c.save();
       c.strokeStyle = s.color;
-      c.lineCap = c.lineJoin = "round";
       if (s.kind === "marker") {
+        // 记号笔：直角 —— 平头端点 + 斜切转角，不再圆头圆角。
+        // 转角用 bevel 不用 miter：记号笔线宽是 width×4，自由笔迹的回折角很急，
+        // miter 会在外角拉出长尖刺（实测 width 12/16 时炸得很明显），bevel 是平切一角
+        c.lineCap = "butt";
+        c.lineJoin = "bevel";
         c.globalAlpha = 0.38;
         c.lineWidth = s.width * 4;
       } else {
+        // 画笔仍要圆头：它画的是签字笔式细线，平头会在转折处露出缺口
+        c.lineCap = c.lineJoin = "round";
         c.lineWidth = s.width;
       }
       c.beginPath();
@@ -84,6 +100,43 @@ export function drawShape(c: CanvasRenderingContext2D, s: Shape, deps: RenderDep
       break;
     }
     case "mosaic": {
+      // 线条模式：先在离屏缓冲里把包围盒区域像素化/模糊，再 destination-in 笔刷路径，
+      // 只保留沿轨迹刷过的马赛克，最后贴回目标层
+      if (s.pts && s.pts.length) {
+        const b = shapeBounds(s);
+        if (b.w < 1 || b.h < 1) break;
+        const bw = Math.ceil(b.w);
+        const bh = Math.ceil(b.h);
+        const buf = mosaicBuf(bw, bh);
+        const bc = buf.getContext("2d")!;
+        bc.clearRect(0, 0, bw, bh);
+        bc.save();
+        bc.translate(-b.x, -b.y);
+        if (s.style === "blur") drawBlurred(bc, deps.source, b, s.level);
+        else drawBlocked(bc, deps.source, b, s.level, deps.scratch);
+        bc.restore();
+        bc.save();
+        bc.globalCompositeOperation = "destination-in";
+        bc.strokeStyle = bc.fillStyle = "#000";
+        bc.lineCap = "round";
+        bc.lineJoin = "round";
+        const brush = Math.max(1, s.brush ?? 8);
+        bc.lineWidth = brush;
+        const p0 = s.pts[0];
+        if (s.pts.length === 1) {
+          bc.beginPath();
+          bc.arc(p0.x - b.x, p0.y - b.y, brush / 2, 0, Math.PI * 2);
+          bc.fill();
+        } else {
+          bc.beginPath();
+          bc.moveTo(p0.x - b.x, p0.y - b.y);
+          for (let i = 1; i < s.pts.length; i++) bc.lineTo(s.pts[i].x - b.x, s.pts[i].y - b.y);
+          bc.stroke();
+        }
+        bc.restore();
+        c.drawImage(buf, b.x, b.y);
+        break;
+      }
       if (s.r.w < 1 || s.r.h < 1) break;
       if (s.style === "blur") drawBlurred(c, deps.source, s.r, s.level);
       else drawBlocked(c, deps.source, s.r, s.level, deps.scratch);
@@ -122,13 +175,25 @@ export function drawArrow(
   headStyle: ArrowHead = "solid",
 ): void {
   const ang = Math.atan2(y2 - y1, x2 - x1);
-  const head = Math.max(10 * scale, width * 3);
+  const len = Math.hypot(x2 - x1, y2 - y1);
+  // 头部随线宽长，但夹角别太窄：线宽大时太窄的镖形会被粗杆吃掉，看不出是箭头
+  const head = Math.max(9 * scale, width * 3);
+  const half = 0.42;
+  /**
+   * **杆必须缩进箭头底面以内**，否则线宽一大，端帽会顶过箭尖，
+   * 肉眼看就是"箭头没长在末端"。缩多少看端帽形状：
+   * 平头（butt）正好缩到头部底面；空心头仍走圆头描边，要多让半个线宽。
+   */
+  const capAllowance = headStyle === "hollow" ? width * 0.5 : 0;
+  const back = Math.min(head * Math.cos(half) + capAllowance, len * 0.45);
+  const ux = Math.cos(ang),
+    uy = Math.sin(ang);
   const tip = (tx: number, ty: number, a: number) => {
     if (headStyle === "none") return;
-    const lx = tx - head * Math.cos(a - 0.5),
-      ly = ty - head * Math.sin(a - 0.5);
-    const rx = tx - head * Math.cos(a + 0.5),
-      ry = ty - head * Math.sin(a + 0.5);
+    const lx = tx - head * Math.cos(a - half),
+      ly = ty - head * Math.sin(a - half);
+    const rx = tx - head * Math.cos(a + half),
+      ry = ty - head * Math.sin(a + half);
     if (headStyle === "hollow") {
       // 空心：只描两条边，靠 lineJoin 出尖角
       c.beginPath();
@@ -147,15 +212,77 @@ export function drawArrow(
   };
   c.strokeStyle = c.fillStyle = color;
   c.lineWidth = width;
-  c.lineCap = "round";
-  c.lineJoin = "round";
+  // 箭头一律直角：平头尾端 + 斜接头，不再圆头圆角（空心 V 是历史数据，仍走圆头出尖）
+  c.lineCap = headStyle === "hollow" ? "round" : "butt";
+  c.lineJoin = headStyle === "hollow" ? "round" : "miter";
+  // 有头的那一端把杆缩 back；无头（— 样式）时端点就是端点，不缩
+  const tailBack = double ? back : 0;
+  const tipBack = headStyle === "none" ? 0 : back;
   c.beginPath();
-  c.moveTo(x1, y1);
-  c.lineTo(x2, y2);
+  c.moveTo(x1 + ux * tailBack, y1 + uy * tailBack);
+  c.lineTo(x2 - ux * tipBack, y2 - uy * tipBack);
   c.stroke();
   tip(x2, y2, ang);
   // ↔：起点补一个反向箭头
   if (double) tip(x1, y1, ang + Math.PI);
+}
+
+function applyClip(c: CanvasRenderingContext2D, clip: Rect | null): void {
+  if (clip) {
+    c.beginPath();
+    c.rect(clip.x, clip.y, clip.w, clip.h);
+    c.clip();
+  }
+}
+
+/** 橡皮擦：destination-out 下只认 alpha，画纯黑笔刷/框即可在标注层打洞。
+    path=圆头折线（width=笔刷直径），rect=实心框 */
+function drawErase(c: CanvasRenderingContext2D, e: EraseShape): void {
+  c.fillStyle = c.strokeStyle = "#000";
+  if (e.mode === "rect" && e.r) {
+    c.fillRect(e.r.x, e.r.y, e.r.w, e.r.h);
+    return;
+  }
+  const pts = e.pts ?? [];
+  if (!pts.length) return;
+  const w = e.width || 1;
+  if (pts.length === 1) {
+    c.beginPath();
+    c.arc(pts[0].x, pts[0].y, w / 2, 0, Math.PI * 2);
+    c.fill();
+    return;
+  }
+  c.lineCap = "round";
+  c.lineJoin = "round";
+  c.lineWidth = w;
+  c.beginPath();
+  c.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i++) c.lineTo(pts[i].x, pts[i].y);
+  c.stroke();
+}
+
+// 线条马赛克的临时缓冲（包围盒大小）：像素化整块 → destination-in 笔刷路径
+let _mbuf: HTMLCanvasElement | null = null;
+function mosaicBuf(w: number, h: number): HTMLCanvasElement {
+  if (!_mbuf) _mbuf = document.createElement("canvas");
+  if (_mbuf.width !== w || _mbuf.height !== h) {
+    _mbuf.width = w;
+    _mbuf.height = h;
+  }
+  return _mbuf;
+}
+
+// 标注离屏层：仅当存在橡皮擦时启用（擦除要在标注像素上打洞，不能洞穿底图）
+let _layer: HTMLCanvasElement | null = null;
+function layerFor(w: number, h: number): CanvasRenderingContext2D {
+  if (!_layer) _layer = document.createElement("canvas");
+  if (_layer.width !== w || _layer.height !== h) {
+    _layer.width = w;
+    _layer.height = h;
+  }
+  const lc = _layer.getContext("2d")!;
+  lc.clearRect(0, 0, w, h);
+  return lc;
 }
 
 export function drawShapes(
@@ -164,14 +291,33 @@ export function drawShapes(
   clip: Rect | null,
   deps: RenderDeps,
 ): void {
-  for (const s of shapes) {
-    c.save();
-    if (clip) {
-      c.beginPath();
-      c.rect(clip.x, clip.y, clip.w, clip.h);
-      c.clip();
+  const erases = shapes.filter((s) => s.kind === "erase");
+  if (!erases.length) {
+    for (const s of shapes) {
+      c.save();
+      applyClip(c, clip);
+      drawShape(c, s, deps);
+      c.restore();
     }
-    drawShape(c, s, deps);
-    c.restore();
+    return;
   }
+  // 有橡皮擦：离屏层上**按绘制顺序**单遍合成——遇到 erase 就 destination-out 打洞，
+  // 只擦掉它之前画的标注；之后新画的图形叠在洞上，擦过的区域因此可以再次绘制。
+  const { width, height } = c.canvas;
+  const lc = layerFor(width, height);
+  for (const s of shapes) {
+    lc.save();
+    applyClip(lc, clip);
+    if (s.kind === "erase") {
+      lc.globalCompositeOperation = "destination-out";
+      drawErase(lc, s as EraseShape);
+    } else {
+      drawShape(lc, s, deps);
+    }
+    lc.restore();
+  }
+  c.save();
+  applyClip(c, clip);
+  c.drawImage(_layer!, 0, 0);
+  c.restore();
 }

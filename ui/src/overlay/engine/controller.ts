@@ -8,7 +8,14 @@ import { paint } from "./painter";
 import { PixelReader } from "./pixelReader";
 import { makeScratch } from "../../annotate/mosaic";
 import { drawShapes } from "../../annotate/render";
-import { DEFAULT_PROPS, shapeBounds, type DrawProps, type Shape } from "../../annotate/model";
+import {
+  canEditPoints,
+  DEFAULT_PROPS,
+  type DrawProps,
+  moveEditPoint,
+  type Shape,
+  shapeEditPoints,
+} from "../../annotate/model";
 import { parse as parseAnnotation } from "../../annotate/serialize";
 import {
   clamp,
@@ -57,7 +64,8 @@ type Anchor =
   | { mode: "move"; rect0: Rect; start: Point }
   | { mode: "shape-new"; start: Point; id: number }
   | { mode: "shape-move"; start: Point; id: number; origin: Shape }
-  | { mode: "erase"; start: Point; deleted: boolean }
+  /** 拖「刚画完那一支」的端点：index 对应 shapeEditPoints 的下标 */
+  | { mode: "shape-edit"; start: Point; id: number; index: number; origin: Shape }
   | null;
 
 export interface FrameInfo {
@@ -77,6 +85,17 @@ export interface FrameInfo {
   winW: number;
   winH: number;
 }
+
+/** 线宽的逻辑 px 上下限（滚轮范围，也是属性栏圆点预览的读数上限） */
+const MIN_WIDTH = 1;
+const MAX_WIDTH = 16;
+
+/** 笔刷类的逻辑 px 上下限：马赛克线条是笔刷直径，橡皮是命中半径。
+ *  比线宽宽得多 —— 打码/擦除要盖住成片像素，16px 根本不够用。 */
+const MIN_MOSAIC_BRUSH = 8;
+const MAX_MOSAIC_BRUSH = 80;
+const MIN_ERASER = 4;
+const MAX_ERASER = 80;
 
 /** 工具单键。R 让给「恢复上次选区」（与 Snipaste 一致），矩形改用 V（设计工具惯例）。
  *  表内字母与 WASD 的 w/a/s/d 不重叠，所以走键不会抢方向微调。 */
@@ -108,6 +127,19 @@ export class OverlayController {
   private readonly scratch = makeScratch();
   private anchor: Anchor = null;
   private pointer: Point | null = null;
+  /** 悬停反馈：光标正压着的手柄 / 光标下的已画图形（不进 store，只影响画布与光标） */
+  private hotHandle: Handle | null = null;
+  private hoverShapeId: number | null = null;
+  /**
+   * 「刚画完、还能拖端点」的那支图形。对齐 Snipaste：**只在绘制后当场存活** ——
+   * 起笔画下一支、切工具、右键退回、撤销重做，都会把它交出去（置 null）。
+   * 不进 store：它是纯交互态，撤销快照里不该有它，画布那一趟直接读字段。
+   */
+  private editId: number | null = null;
+  /** 光标当前压着 editId 那支的第几个端点；-1 = 没压着 */
+  private hotEdit = -1;
+  /** store 订阅里挂 updateCursor —— 见 bind() 的注释 */
+  private unsubCursor: (() => void) | null = null;
   private spaceHeld = false;
   private altHeld = false;
   private chain: SnapshotDto[] = [];
@@ -222,6 +254,8 @@ export class OverlayController {
     }
     this.measureLayout();
     this.bind();
+    // 首帧也走一次状态判定：恢复出带刷圈的工具时，不等鼠标动就该是圈而不是十字
+    this.updateCursor();
     // 关键：loadFrame 必须自己置 dirty。loop() 是 `if (dirty) draw`，
     // 而 dirty 初始为 false、只有指针/键盘事件才 mark() —— 不补这一下，
     // reveal() 会在"一帧都没画"的画布上执行，首帧之前什么都看不见。
@@ -254,6 +288,8 @@ export class OverlayController {
     const c = this.canvas;
     c.addEventListener("pointerdown", this.onPointerDown);
     c.addEventListener("pointermove", this.onPointerMove);
+    // 移到工具条/属性栏上时画布收不到 pointermove，悬停高亮会赖在最后一帧上 —— 离开即清
+    c.addEventListener("pointerleave", this.onPointerLeave);
     c.addEventListener("pointerup", this.onPointerUp);
     c.addEventListener("pointercancel", this.onPointerUp);
     c.addEventListener("wheel", this.onWheel, { passive: false });
@@ -263,14 +299,24 @@ export class OverlayController {
     window.addEventListener("keyup", this.onKeyUp);
     window.addEventListener("blur", this.onBlur);
     window.addEventListener("resize", this.onResize);
+    /* 光标跟着状态走，而不是跟着"某个记得调 updateCursor 的调用点"走。
+       以前只在 onPointerMove / setTool 里调，于是右键裸 store.set 清工具、
+       属性栏点「矩形模式」改 eraserRect/mosaicMode 这些路径都漏了 ——
+       表现是刷圈已经没了但 cursor 还停在 none，指针直接隐形。
+       store.set 自带同值去重，updateCursor 又只在值变化时写 style，代价是一次比较。 */
+    this.unsubCursor?.(); // bind() 理论上每实例一次，重复调用也不该叠订阅
+    this.unsubCursor = this.store.subscribe(() => this.updateCursor());
   }
 
   dispose(): void {
     this.disposed = true;
+    this.unsubCursor?.();
+    this.unsubCursor = null;
     cancelAnimationFrame(this.raf);
     const c = this.canvas;
     c.removeEventListener("pointerdown", this.onPointerDown);
     c.removeEventListener("pointermove", this.onPointerMove);
+    c.removeEventListener("pointerleave", this.onPointerLeave);
     c.removeEventListener("pointerup", this.onPointerUp);
     c.removeEventListener("pointercancel", this.onPointerUp);
     c.removeEventListener("wheel", this.onWheel);
@@ -315,9 +361,26 @@ export class OverlayController {
     this.raf = requestAnimationFrame(this.loop);
   };
 
+  /**
+   * 笔刷圈的半径（物理 px）：橡皮的圆头模式、马赛克的线条模式。
+   * 返回 null 表示不画圈（此时恢复常规光标）。圈可见时系统光标会被隐藏，
+   * 由画笔中心十字代替瞄准点 —— 见 painter 与 updateCursor。
+   */
+  private ringRadius(): number | null {
+    const s = this.state;
+    if (s.phase !== "adjusting" && s.phase !== "tool-drawing") return null;
+    if (s.tool === "eraser" && !s.props.eraserRect) return s.props.eraserRadius * this.scale;
+    if (s.tool === "mosaic" && s.props.mosaicMode === "line") {
+      return (s.props.mosaicBrush * this.scale) / 2;
+    }
+    return null;
+  }
+
   private draw(): void {
     if (!this.frame) return;
     const s = this.state;
+    const ring = this.ringRadius();
+    const editable = this.editableShape();
     if (!this.reader) {
       // 懒建：放大镜真要读像素才铺一张全幅 CPU 后端画布
       this.reader = new PixelReader(this.frame, this.frame.width, this.frame.height);
@@ -335,13 +398,15 @@ export class OverlayController {
         // 重编辑里选区就是整幅图，画 8 向手柄只会沿图片边缘一圈噪声
         showHandles: s.phase === "adjusting" && s.toolbarVisible && !s.tool && !this.isEditor,
         selectedId: s.selectedId,
+        hoverId: this.hoverShapeId,
+        hotHandle: this.hotHandle,
+        // 刚画完那支的端点句柄（空数组 = 没有可编辑的图形）
+        editPoints: editable ? shapeEditPoints(editable) : [],
+        hotEdit: this.hotEdit,
         accent: ACCENT,
         maskAlpha: MASK_ALPHA,
         handleSize: this.handleSize,
-        eraserRing:
-          s.tool === "eraser" && this.pointer && (s.phase === "adjusting" || s.phase === "tool-drawing")
-            ? { x: this.pointer.x, y: this.pointer.y, r: s.props.eraserRadius * this.scale }
-            : null,
+        brushRing: ring !== null && this.pointer ? { x: this.pointer.x, y: this.pointer.y, r: ring } : null,
       },
     );
     this.publishFrameInfo();
@@ -470,18 +535,89 @@ export class OverlayController {
     return !!s && p.x >= s.x && p.x <= s.x + s.w && p.y >= s.y && p.y <= s.y + s.h;
   }
 
+  /** 可编辑那支的端点命中，返回下标；没得编辑 / 没压着 = -1。容差与选区手柄同宽 */
+  private hitEditable(p: Point): number {
+    const sh = this.editableShape();
+    if (!sh) return -1;
+    const tol = this.handleSize;
+    const pts = shapeEditPoints(sh);
+    for (let i = 0; i < pts.length; i++) {
+      if (Math.abs(pts[i].x - p.x) <= tol && Math.abs(pts[i].y - p.y) <= tol) return i;
+    }
+    return -1;
+  }
+
+  /** 当前可拖端点的图形（图形被撤销掉时自然变 null，句柄也就没了） */
+  private editableShape(): Shape | null {
+    if (this.editId === null) return null;
+    return this.state.shapes.find((x) => x.id === this.editId) ?? null;
+  }
+
+  /** 交还「可编辑」状态：起新笔、切工具、退回、undo/redo 都要调 */
+  private releaseEditHandles(): void {
+    if (this.editId === null && this.hotEdit < 0) return;
+    this.editId = null;
+    this.hotEdit = -1;
+    this.mark();
+  }
+
+  /**
+   * 光标 = 状态的纯函数。判定顺序：拖拽中的锁定值 > 刷圈 > 文字插入点 > 悬停态。
+   *
+   * **拖拽中必须用锁定值**：resize 时每帧 sel 都在变，再拿实时位置去 hitHandle，
+   * 选区一撑大手柄就跑出容差，光标会在 resize / move / crosshair 之间抖。
+   * 悬停态（hotHandle / hoverShapeId）由 updateHover 统一算，这里只读结果 ——
+   * 画布上的高亮和光标因此永远说同一句话。
+   */
   private updateCursor(): void {
     const s = this.state;
     const p = this.pointer;
+    const a = this.anchor;
     let c = "crosshair";
-    if (s.tool === "eraser") c = "none"; // 橡皮用画布上自绘的刷圈当光标
+    if (a?.mode === "resize") c = CURSOR_FOR_HANDLE[a.handle];
+    else if (a?.mode === "move" || a?.mode === "shape-move" || a?.mode === "shape-edit") c = "move";
+    // 压在「刚画完那支」的端点上：此时工具还开着（默认是十字），但这一格该给抓手
+    else if (this.hotEdit >= 0) c = "move";
+    // 有刷圈的模式（橡皮圆头 / 马赛克线条）用画布自绘的圈当光标，
+    // 隐藏系统光标避免圈+十字双光标打架；矩形模式仍用十字
+    else if (this.ringRadius() !== null) c = "none";
     else if (s.pendingTextAt) c = "text";
     else if (s.phase === "adjusting" && !s.tool && p) {
-      const h = this.hitHandle(p);
-      if (h) c = CURSOR_FOR_HANDLE[h];
-      else if (this.inSel(p)) c = "move";
+      if (this.hotHandle) c = CURSOR_FOR_HANDLE[this.hotHandle];
+      else if (this.hoverShapeId !== null || this.inSel(p)) c = "move";
     }
     if (this.canvas.style.cursor !== c) this.canvas.style.cursor = c;
+  }
+
+  /**
+   * 没有按下时的悬停判定：命中哪个手柄、压在哪个已画图形上，一次算完，
+   * 供 updateCursor 与 paint 共用（分开算就会出现"光标说 move、画布没高亮"）。
+   */
+  private updateHover(p: Point): void {
+    const s = this.state;
+    // 端点句柄不看工具是否开着：刚画完箭头时工具仍是选中的，句柄照样要能悬停
+    // （本方法只在没有按下锚点时被调用，不必再判 drawing/tool-drawing）
+    const ei = this.hotEdit;
+    const nextEdit = this.hitEditable(p);
+    const on = s.phase === "adjusting" && !s.tool && !s.pendingTextAt && nextEdit < 0;
+    const h = on ? this.hitHandle(p) : null;
+    const sh = on && !h ? this.shapeAt(p) : null;
+    const id = sh && this.inSel(p) ? sh.id : null;
+    if (ei === nextEdit && h === this.hotHandle && id === this.hoverShapeId) return;
+    this.hotEdit = nextEdit;
+    this.hotHandle = h;
+    this.hoverShapeId = id;
+    this.mark();
+  }
+
+  /** 悬停态作废（按下、切工具、退回检测态、指针离开画布时都要清，
+   *  否则高亮/放大的那颗点会赖在最后一帧上） */
+  private clearHover(): void {
+    if (this.hotHandle === null && this.hoverShapeId === null && this.hotEdit < 0) return;
+    this.hotHandle = null;
+    this.hoverShapeId = null;
+    this.hotEdit = -1;
+    this.mark();
   }
 
   // ---------- 指针 ----------
@@ -492,6 +628,7 @@ export class OverlayController {
     const p = this.evPos(e);
     this.pointer = p;
     const s = this.state;
+    this.clearHover();
 
     if (e.button === 1) {
       if (s.sel) void this.run("pin");
@@ -502,6 +639,25 @@ export class OverlayController {
       return;
     }
     this.canvas.setPointerCapture(e.pointerId);
+
+    // 0) 刚画完那一支的端点句柄优先于一切：不先判它，工具还开着时这一点会被当成
+    //    "起笔画下一支"，句柄就永远拖不动（Snipaste 绘制后当场可改的就是这个入口）
+    const ei = this.hitEditable(p);
+    if (ei >= 0) {
+      const sh = this.editableShape()!;
+      this.pushUndo();
+      this.anchor = {
+        mode: "shape-edit",
+        start: p,
+        id: sh.id,
+        index: ei,
+        origin: JSON.parse(JSON.stringify(sh)) as Shape,
+      };
+      this.mark();
+      return;
+    }
+    // 落点不在句柄上 = 这一支就此定稿（点别处、端点消失后不可再改）
+    this.releaseEditHandles();
 
     if (s.phase === "adjusting" && !s.tool) {
       // 先试命中已有图形（阶段 2 的再选中入口），再试手柄/整体移动
@@ -572,10 +728,12 @@ export class OverlayController {
         const hover = this.hoverFor(p);
         if (!rectEq(hover, this.state.hover)) this.store.set({ hover });
       }
+      this.updateHover(p);
       this.updateCursor();
       this.mark();
       return;
     }
+    this.clearHover();
 
     const bound = { w: this.layout.physW, h: this.layout.physH };
     const sel = this.state.sel;
@@ -623,11 +781,17 @@ export class OverlayController {
     } else if (a.mode === "shape-move") {
       const sh = this.state.shapes.find((x) => x.id === a.id);
       if (sh) applyFromOrigin(sh, a.origin, p.x - a.start.x, p.y - a.start.y);
-    } else if (a.mode === "erase") {
-      this.eraseAt(p);
+    } else if (a.mode === "shape-edit") {
+      const sh = this.state.shapes.find((x) => x.id === a.id);
+      if (sh) moveEditPoint(sh, a.index, p);
     }
     this.updateCursor();
     this.mark();
+  };
+
+  private onPointerLeave = () => {
+    // 只在没按下时清：拖拽中指针飞出画布是常事，锚点还得留着继续算
+    if (!this.anchor) this.clearHover();
   };
 
   private onPointerUp = (e: PointerEvent) => {
@@ -648,6 +812,10 @@ export class OverlayController {
       this.store.set({ phase: "adjusting" });
     } else if (a.mode === "shape-move") {
       this.store.set({ phase: "adjusting" });
+    } else if (a.mode === "shape-edit") {
+      // 拖完一端句柄要继续留着，好接着拖另一端；"点别处才定稿"由下一次
+      // pointerdown 的 releaseEditHandles 负责，这里不收
+      this.store.set({ phase: "adjusting" });
     } else {
       this.store.set({ phase: "adjusting", toolbarVisible: true });
     }
@@ -656,7 +824,8 @@ export class OverlayController {
 
   private onWheel = (e: WheelEvent) => {
     e.preventDefault();
-    if (this.state.tool) this.bumpWidth(e.deltaY < 0 ? 1 : -1);
+    // 有工具 → 调该工具的尺寸；选中了已画图形 → 调那个图形；都没有 → 换吸附层级
+    if (this.state.tool || this.state.selectedId !== null) this.bumpSize(e.deltaY < 0 ? 1 : -1);
     else if (!this.state.sel) this.cycleChain(e.deltaY > 0 ? 1 : -1);
   };
 
@@ -686,12 +855,6 @@ export class OverlayController {
       this.mark();
       return;
     }
-    if (this.anchor?.mode === "erase") {
-      this.anchor = null;
-      this.store.set({ phase: "adjusting" });
-      this.mark();
-      return;
-    }
     if (s.sel && s.phase !== "picking") {
       this.store.set({
         phase: "picking",
@@ -701,6 +864,8 @@ export class OverlayController {
         toolbarVisible: true,
         hover: this.pointer ? this.hoverFor(this.pointer) : null,
       });
+      this.clearHover();
+      this.releaseEditHandles();
       this.committedRect = null;
       this.mark();
       return;
@@ -768,11 +933,9 @@ export class OverlayController {
       }
       return;
     }
-    if (k === "[" || k === "]" || k === "1" || k === "2") {
-      e.preventDefault();
-      this.bumpWidth(k === "[" || k === "1" ? -1 : 1);
-      return;
-    }
+    // 尺寸（线宽 / 橡皮大小 / 马赛克粒度）只认滚轮：这里不再绑 [ ] 1 2。
+    // 保留键盘的话，属性栏就还得做成可点的档位按钮才能"看起来一致"，
+    // 而按需求线宽要的是单一入口 —— 见 bumpSize 与 PropertyBar 的只读圆点。
 
     // 2) 带修饰键的命令
     if (mod) {
@@ -811,6 +974,14 @@ export class OverlayController {
       e.preventDefault();
       if (this.isEditor) return; // 重编辑里选区就是整幅图，没有"上次选区"可言
       if (!this.restoreLastRect()) this.store.set({ error: "没有可恢复的上次选区" });
+      return;
+    }
+
+    // 4b) F：描边 ⇄ 填充（仅矩形/椭圆；工具未激活但选中了它们也生效）
+    if (lower === "f") {
+      e.preventDefault();
+      if (!this.fillState().visible) return;
+      this.toggleFill();
       return;
     }
 
@@ -941,7 +1112,13 @@ export class OverlayController {
   setTool(t: ToolId | null): void {
     // 切工具时丢弃未提交的文字输入（输入框随 pendingTextAt 一起消失）
     this.store.set({ tool: t, selectedId: null, pendingTextAt: null });
+    this.clearHover();
+    // 切工具 = 离开刚才那一支，端点句柄随之消失
+    this.releaseEditHandles();
     this.pendingTextValue = "";
+    // 光标要立刻跟上：用键盘 E/X 切到有刷圈的工具时，鼠标可能根本不动，
+    // 不在这里调 updateCursor 就会「系统十字光标 + 自绘圆圈」同时挂着
+    this.updateCursor();
     this.mark();
   }
 
@@ -950,8 +1127,88 @@ export class OverlayController {
     this.mark();
   }
 
-  private bumpWidth(dir: number): void {
-    this.setProps({ width: clamp(this.state.props.width + dir, 1, 24) });
+  /**
+   * 描边 / 填充单选组的落点：圆点=描边、填充按钮=填充，两个入口都走这里。
+   * 用「设为某值」而不是翻转 —— 点已选中的那一项必须原地不动，
+   * 否则单选组会退化成开关，圆点和填充按钮互相打脸。
+   * 选中了已画的矩形/椭圆时连同该图形一起改 —— 否则只动全局默认值，
+   * 用户点选一个图形再按 F 会毫无反应。
+   */
+  setFill(filled: boolean): void {
+    const sel = this.state.shapes.find((x) => x.id === this.state.selectedId);
+    const target = sel && (sel.kind === "rect" || sel.kind === "ellipse") ? sel : null;
+    if (target && target.filled !== filled) {
+      target.filled = filled;
+      this.touchShapes();
+    }
+    if (this.state.props.filled !== filled) this.setProps({ filled });
+  }
+
+  /** 描边 ⇄ 填充。F 键走这个（切换语义），属性栏两个单选项走 setFill */
+  toggleFill(): void {
+    this.setFill(!this.fillState().filled);
+  }
+
+  /** 填充开关的可见性与当前态：工具是矩形/椭圆，或选中的图形是它们。
+   *  和 toggleFill 读同一套判定，按钮不会显示得出来却点不动。 */
+  fillState(): { visible: boolean; filled: boolean } {
+    const sel = this.state.shapes.find((x) => x.id === this.state.selectedId);
+    const onShape = !!sel && (sel.kind === "rect" || sel.kind === "ellipse");
+    const onTool = this.state.tool === "rect" || this.state.tool === "ellipse";
+    const filled =
+      onShape && sel && (sel.kind === "rect" || sel.kind === "ellipse")
+        ? sel.filled
+        : this.state.props.filled;
+    return { visible: onTool || onShape, filled };
+  }
+
+  /**
+   * 调“大小”（线宽 / 橡皮半径 / 马赛克粒度），**只有滚轮这一个入口**。
+   * 没有激活工具但选中了已画图形时，直接改那个图形本身 —— 属性栏的圆点已改成只读
+   * 读数，若这里仍只改全局 props，选中图形就会变成谁也调不动的死值。
+   */
+  /** 属性栏的尺寸圆点也吃滚轮（绘图区之外唯一的调节入口） */
+  adjustSize(dir: number): void {
+    this.bumpSize(dir);
+  }
+
+  private bumpSize(dir: number): void {
+    const p = this.state.props;
+    const t = this.state.tool;
+    if (!t) {
+      const sel = this.state.shapes.find((x) => x.id === this.state.selectedId);
+      if (sel && sel.kind !== "text" && sel.kind !== "step") {
+        // 图形存**物理** px：步长与上下限都要按 scale 换算，
+        // 否则 150% 屏上"上限 16"会提前卡在约 10.7 逻辑 px，且每格滚动也不等宽
+        sel.width = clamp(sel.width + dir * this.scale, MIN_WIDTH * this.scale, MAX_WIDTH * this.scale);
+        this.setProps({ width: clamp(Math.round(sel.width / this.scale), MIN_WIDTH, MAX_WIDTH) });
+        this.touchShapes();
+      }
+      return;
+    }
+    // 数值不再有滚动气泡：改由属性栏圆点上的悬停读数显示（见 PropertyBar 的 SizeDot）
+    if (t === "mosaic") {
+      // 线条模式调笔刷直径（独立于线宽的范围）；填充模式调像素粒度/模糊半径
+      if (p.mosaicMode === "line") {
+        this.setProps({ mosaicBrush: clamp(p.mosaicBrush + dir * 2, MIN_MOSAIC_BRUSH, MAX_MOSAIC_BRUSH) });
+      } else {
+        this.setProps({ mosaicLevel: clamp(p.mosaicLevel + dir * 2, 2, 40) });
+      }
+    } else if (t === "eraser") {
+      // 步长 ×2：范围放宽到 4–80 后，一格 1px 要滚 76 下太磨人
+      this.setProps({ eraserRadius: clamp(p.eraserRadius + dir * 2, MIN_ERASER, MAX_ERASER) });
+    } else if (t !== "text") {
+      const w = clamp(p.width + dir, MIN_WIDTH, MAX_WIDTH);
+      this.setProps({ width: w });
+      // 句柄还活着 = 这一支仍是"当前作品"：滚轮调的线宽要立刻落到它身上，
+      // 而不是只改默认值等下一支才生效（箭头 / 记号笔 / 画笔同一语义，
+      // 与"点选图形后滚轮改它自己的宽度"那条走的是同一件事）
+      const sh = this.editableShape();
+      if (sh) {
+        sh.width = w * this.scale; // 图形存物理 px，与 beginShape 的换算一致
+        this.touchShapes();
+      }
+    }
   }
 
   private bumpStepNumber(dir: number): void {
@@ -976,28 +1233,41 @@ export class OverlayController {
       this.mark();
       return;
     }
-    if (kind === "eraser") {
-      // 橡皮擦不产图形：按下/拖过的范围内的标注直接删，整次拖拽只压一次撤销
-      this.store.set({ phase: "tool-drawing", selectedId: null });
-      this.anchor = { mode: "erase", start: p, deleted: false };
-      this.eraseAt(p);
-      this.mark();
-      return;
-    }
     const sc = this.scale;
     const props = this.state.props;
     const base = { id: this.nextShapeId++, color: props.color, width: props.width * sc };
     let shape: Shape;
-    if (kind === "rect" || kind === "ellipse") {
+    if (kind === "eraser") {
+      // 橡皮擦产出一条 erase 图形，渲染时对标注层打洞（按区域擦，不整块删）：
+      // path=笔刷折线擦除（width=笔刷直径），rect=框选擦除
+      const w = props.eraserRadius * 2 * sc;
+      shape = props.eraserRect
+        ? { id: base.id, kind: "erase", color: props.color, width: w, mode: "rect", r: { x: p.x, y: p.y, w: 0, h: 0 } }
+        : { id: base.id, kind: "erase", color: props.color, width: w, mode: "path", pts: [{ ...p }] };
+    } else if (kind === "marker" && props.markerRect) {
+      // 记号笔矩形模式：拖出半透明高亮框
+      shape = { ...base, kind: "rect", r: { x: p.x, y: p.y, w: 0, h: 0 }, filled: true, marker: true };
+    } else if (kind === "rect" || kind === "ellipse") {
       shape = { ...base, kind, r: { x: p.x, y: p.y, w: 0, h: 0 }, filled: props.filled };
     } else if (kind === "mosaic") {
-      shape = {
-        ...base,
-        kind: "mosaic",
-        r: { x: p.x, y: p.y, w: 0, h: 0 },
-        style: props.mosaicStyle,
-        level: props.mosaicLevel,
-      };
+      shape =
+        props.mosaicMode === "line"
+          ? {
+              ...base,
+              kind: "mosaic",
+              r: { x: p.x, y: p.y, w: 0, h: 0 },
+              pts: [{ ...p }],
+              brush: props.mosaicBrush * sc,
+              style: props.mosaicStyle,
+              level: props.mosaicLevel,
+            }
+          : {
+              ...base,
+              kind: "mosaic",
+              r: { x: p.x, y: p.y, w: 0, h: 0 },
+              style: props.mosaicStyle,
+              level: props.mosaicLevel,
+            };
     } else if (kind === "arrow") {
       shape = {
         ...base,
@@ -1039,7 +1309,13 @@ export class OverlayController {
     const s = shapes.find((x) => x.id === id);
     const a = this.anchor;
     if (!s || a?.mode !== "shape-new") return;
-    if (s.kind === "rect" || s.kind === "ellipse" || s.kind === "mosaic") {
+    if (s.kind === "mosaic" && s.pts) {
+      // 线条马赛克：沿鼠标轨迹加点（brush 笔刷在渲染时决定宽度）
+      const last = s.pts[s.pts.length - 1];
+      if (Math.hypot(p.x - last.x, p.y - last.y) >= MIN_POINT_DIST * this.scale) {
+        s.pts.push({ x: p.x, y: p.y });
+      }
+    } else if (s.kind === "rect" || s.kind === "ellipse" || s.kind === "mosaic") {
       let dx = p.x - a.start.x;
       let dy = p.y - a.start.y;
       if (e.shiftKey) {
@@ -1057,10 +1333,22 @@ export class OverlayController {
         b = { x: s.a.x + Math.cos(snap) * len, y: s.a.y + Math.sin(snap) * len };
       }
       s.b = b;
-    } else if (s.kind === "polyline" || s.kind === "marker") {
+    } else if (s.kind === "marker") {
+      // 记号笔线模式：只认起点→终点，画一条直线（不跟随鼠标中间轨迹）
+      s.pts = [{ ...a.start }, { x: p.x, y: p.y }];
+    } else if (s.kind === "polyline") {
       const last = s.pts[s.pts.length - 1];
       if (Math.hypot(p.x - last.x, p.y - last.y) >= MIN_POINT_DIST * this.scale) {
         s.pts.push({ x: p.x, y: p.y });
+      }
+    } else if (s.kind === "erase") {
+      if (s.mode === "rect") {
+        s.r = norm(a.start.x, a.start.y, p.x - a.start.x, p.y - a.start.y);
+      } else if (s.pts) {
+        const last = s.pts[s.pts.length - 1];
+        if (Math.hypot(p.x - last.x, p.y - last.y) >= MIN_POINT_DIST * this.scale) {
+          s.pts.push({ x: p.x, y: p.y });
+        }
       }
     }
     this.mark();
@@ -1070,11 +1358,18 @@ export class OverlayController {
     const s = this.state.shapes.find((x) => x.id === id);
     if (!s) return;
     let keep = true;
-    if (s.kind === "rect" || s.kind === "ellipse" || s.kind === "mosaic") keep = s.r.w > 2 && s.r.h > 2;
+    if (s.kind === "mosaic" && s.pts) keep = s.pts.length > 1;
+    else if (s.kind === "rect" || s.kind === "ellipse" || s.kind === "mosaic") keep = s.r.w > 2 && s.r.h > 2;
     else if (s.kind === "arrow") keep = Math.hypot(s.b.x - s.a.x, s.b.y - s.a.y) > 3;
     else if (s.kind === "polyline" || s.kind === "marker") keep = s.pts.length > 1;
+    // 橡皮擦：单击（一个点）也要生效——擦一个笔刷大的点；矩形擦需拖出尺寸
+    else if (s.kind === "erase") keep = s.mode === "rect" ? !!s.r && s.r.w > 2 && s.r.h > 2 : (s.pts?.length ?? 0) >= 1;
     if (keep) {
       this.touchShapes();
+      // 只有箭头 / 画笔 / 记号笔留端点句柄（对齐 Snipaste：矩形/椭圆画完就是定形，
+      // 再改靠重新画，不当场给缩放柄）
+      this.editId = canEditPoints(s.kind) ? id : null;
+      this.hotEdit = -1;
       return;
     }
     // 太小的废图形丢弃，并把 beginShape 压的那次快照还原
@@ -1089,24 +1384,7 @@ export class OverlayController {
     if (id === null) return;
     this.pushUndo();
     this.store.set({ shapes: this.state.shapes.filter((s) => s.id !== id), selectedId: null });
-    this.mark();
-  }
-
-  /** 橡皮擦：删掉包围盒碰到笔刷圆的所有图形；整次拖拽只在首次删除时压一次撤销栈 */
-  private eraseAt(p: Point): void {
-    const r = this.state.props.eraserRadius * this.scale;
-    const hits = this.state.shapes.filter((s) => {
-      const b = shapeBounds(s);
-      return p.x >= b.x - r && p.x <= b.x + b.w + r && p.y >= b.y - r && p.y <= b.y + b.h + r;
-    });
-    if (!hits.length) return;
-    const a = this.anchor;
-    if (a?.mode === "erase" && !a.deleted) {
-      this.pushUndo();
-      a.deleted = true;
-    }
-    const gone = new Set(hits.map((s) => s.id));
-    this.store.set({ shapes: this.state.shapes.filter((s) => !gone.has(s.id)) });
+    if (this.editId === id) this.releaseEditHandles();
     this.mark();
   }
 
@@ -1184,6 +1462,8 @@ export class OverlayController {
       canUndo: this.past.length > 0,
       canRedo: true,
     });
+    // 快照是整串图形换掉的，句柄指向的对象已经不存在了
+    this.releaseEditHandles();
     this.mark();
   }
 
@@ -1197,6 +1477,7 @@ export class OverlayController {
       canUndo: true,
       canRedo: this.future.length > 0,
     });
+    this.releaseEditHandles();
     this.mark();
   }
 
@@ -1263,7 +1544,10 @@ export class OverlayController {
         });
       }
     }
-    await invoke("export_result", { req });
+    const res = await invoke<{ cancelled?: boolean }>("export_result", { req });
+    // 保存被取消：宿主没关截图层（用户可继续操作），这里必须复位 busy，
+    // 否则后续复制/贴图/保存全被开头的 `if (busy) return` 挡死
+    if (res?.cancelled) this.store.set({ busy: false });
   }
 
   /** UI 与快捷键统一入口：失败必须可见，不能静默卡在截图态 */
@@ -1406,6 +1690,8 @@ function applyFromOrigin(s: Shape, o: Shape, dx: number, dy: number): void {
 }
 
 function hitShape(s: Shape, p: Point, scale: number): boolean {
+  // 橡皮擦痕迹不可再选中/拖动，只作为擦除遮罩存在
+  if (s.kind === "erase") return false;
   const tol = Math.max(4, (s.width ?? 0) / scale / 2 + 4) * scale;
   switch (s.kind) {
     case "mosaic":

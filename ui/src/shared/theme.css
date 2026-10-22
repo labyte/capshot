@@ -12,16 +12,27 @@
   --bar-radius: 6px;
   --bar-fg: #dfe4ee;
   --bar-muted: #9aa4b2;
-  /* 标注工具条/属性栏：Snipaste 的浮条是浅灰底 + 深灰图标 + 选中淡蓝药丸，
-     放大镜、读数、贴图条仍是深底（--bar-*），两套并存 */
-  --tb-bg: #f4f5f6;
+  /* 标注工具条/属性栏：值全部取自 docs/capshot-图/ 的 Snipaste 实拍逐像素实测
+     （32×32 整格、选中=整格实心蓝 #2080f0 + 白图标、hover=整格 #d4d4d4、
+     图标墨色 #323232、撤销/重做刻意更浅的 #7b7b7b、分隔线 1×14 #858585）。
+     放大镜、读数仍是深底（--bar-*），两套并存 */
+  --tb-bg: #f2f2f2;
   --tb-edge: #d6d8db;
+  --tb-cell: 32px;
+  /* 标注条图标墨色（实测 #323232）。刻意不复用 --tb-fg ——
+     历史页 .card-acts button 读的是 --tb-fg，别把它一起改深 */
+  --tb-ink: #323232;
   --tb-fg: #5f6368;
   --tb-fg-strong: #202124;
   --tb-hover: rgba(95, 99, 104, 0.14);
-  --tb-on-bg: #d3e5fb;
-  --tb-on-fg: #1a6fc4;
-  --tb-sep: #d0d2d6;
+  --tb-hover-bg: #d4d4d4;
+  --tb-on-bg: #2080f0;
+  --tb-on-fg: #ffffff;
+  --tb-ink-muted: #7b7b7b;
+  --tb-accent: #2080f0;
+  --tb-sep: #858585;
+  --tb-sep-w: 6px;
+  --tb-sep-h: 14px;
   --tb-muted: #7a7f87;
   --label-bg: rgba(20, 22, 26, 0.82);
   --label-font: 12px ui-monospace, "SFMono-Regular", Consolas, monospace;
@@ -159,7 +170,9 @@ body.settings code {
   cursor: pointer;
 }
 
-.card:hover { border-color: var(--tb-on-fg); }
+/* 注意别读 --tb-on-fg：那个 token 现在是"选中格上的图标色"= 白，
+   卡片描边要的是蓝色本身 */
+.card:hover { border-color: var(--tb-accent); }
 
 .card img {
   width: 100%;
@@ -245,69 +258,92 @@ body.settings code {
 
 /* ---------- 工具条 / 属性栏 ---------- */
 
-/* 尺寸对齐 Snipaste 标注条：16px 图标 + 24×22 按钮 + 2px 间隙，整条更紧凑。
-   配色对齐 Snipaste：浅灰底、深灰图标、选中淡蓝药丸，图标用 currentColor 随主题走 */
+/* 尺寸对齐 Snipaste 标注条实测：整条 32px 高、按钮格 32×32 顶满、格间无间隙。
+   box-sizing 是全局 border-box，所以高度要额外加 2px 把上下 1px 边框让出来，
+   否则格子里面只剩 30px。 */
 .snip-bar {
   position: fixed;
   z-index: 60;
   background: var(--tb-bg);
   border: 1px solid var(--tb-edge);
-  border-radius: var(--bar-radius);
+  border-radius: 2px;
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.22);
-  padding: 2px;
+  padding: 0;
+  height: calc(var(--tb-cell) + 2px);
   display: flex;
 }
 
 .snip-bar-row {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 0;
 }
 
+/* 图标本体：参照图实测 13–15px。SVG 自身按 16 单位画、默认渲染 16px，
+   而各图标只占 12 单位视觉框 → 实际只有 12px，偏小。整条 bar 里抬到 18px，
+   12 单位就落回 13.5px，与实测对齐（不去改每个图标各自的几何） */
+.snip-bar svg { width: 18px; height: 18px; }
+
 .snip-btn {
-  width: 24px;
-  height: 22px;
+  width: var(--tb-cell);
+  height: var(--tb-cell);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   background: transparent;
-  color: var(--tb-fg);
+  color: var(--tb-ink);
   border: 0;
-  border-radius: 4px;
+  border-radius: 0;
   cursor: pointer;
   padding: 0;
-}
-
-.snip-btn:hover { background: var(--tb-hover); color: var(--tb-fg-strong); }
-.snip-btn:disabled { opacity: 0.3; cursor: default; }
-.snip-btn.on { background: var(--tb-on-bg); color: var(--tb-on-fg); }
-/* 画笔的激活态：中性灰底提亮图标，不用蓝色药丸 */
-.snip-btn.on-soft { background: var(--tb-hover); color: var(--tb-fg-strong); }
-.snip-btn.danger:hover { background: #f7d6d3; color: #cf3b32; }
-
-.snip-sep {
-  width: 1px;
-  height: 18px;
-  background: var(--tb-sep);
-  margin: 0 4px;
   flex: none;
 }
 
-.snip-props { padding: 4px 5px; }
+/* hover 只换底色，墨色不动（参照图实测） */
+.snip-btn:hover { background: var(--tb-hover-bg); color: var(--tb-ink); }
+.snip-btn:disabled { opacity: 0.3; cursor: default; }
+/* 选中态 = 整格实心蓝 + 白色图标（参照图实测，不再是浅蓝药丸） */
+.snip-btn.on { background: var(--tb-on-bg); color: var(--tb-on-fg); }
+/* 画笔的激活态：中性灰底，不用实心蓝格（doc §5 用户指定，参照图里画笔其实是蓝格） */
+.snip-btn.on-soft { background: var(--tb-hover-bg); color: var(--tb-ink); }
+.snip-btn.danger:hover { background: #f7d6d3; color: #cf3b32; }
+/* 撤销/重做：参照图刻意比工具图标浅一档（hover 仍只换底色，墨色不动） */
+.snip-btn.muted { color: var(--tb-ink-muted); }
+.snip-btn.muted.on { color: var(--tb-on-fg); }
 
+/* 分隔线：占 6px 宽的槽，中间画 1×14 的线（参照图实测） */
+.snip-sep {
+  width: var(--tb-sep-w);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.snip-sep::before {
+  content: "";
+  width: 1px;
+  height: var(--tb-sep-h);
+  background: var(--tb-sep);
+}
+
+.snip-props { padding: 0; }
+
+/* 当前色块：参照图实测 24×24 + 深色描边，右下角一个小三角标"这是自选色" */
 .snip-color {
-  width: 22px;
-  height: 22px;
-  border-radius: 4px;
+  position: relative;
+  width: 24px;
+  height: 24px;
+  border-radius: 2px;
   overflow: hidden;
-  border: 1px solid var(--tb-edge);
+  border: 1px solid #222222;
   flex: none;
   cursor: pointer;
+  margin: 0 4px;
 }
 
 .snip-color input {
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   margin: -5px;
   border: 0;
   padding: 0;
@@ -315,29 +351,55 @@ body.settings code {
   background: none;
 }
 
+.snip-color.custom::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  border-style: solid;
+  border-width: 0 0 7px 7px;
+  border-color: transparent transparent var(--tb-accent) transparent;
+  pointer-events: none;
+}
+
 .snip-swatch {
-  width: 14px;
-  height: 14px;
-  border-radius: 3px;
+  width: 11px;
+  height: 11px;
+  border-radius: 1px;
   border: 1px solid rgba(0, 0, 0, 0.35);
   cursor: pointer;
   padding: 0;
   flex: none;
 }
 
-.snip-swatch.on { outline: 2px solid var(--tb-on-fg); outline-offset: 1px; }
+.snip-swatch.on { outline: 1px solid var(--tb-ink); outline-offset: 1px; }
 
-/* 尺寸圆点按钮：单个 • 点击循环档位，右上角红点提示"可调"（对齐 Snipaste 的 • 按钮）。
-   圆点直径由内联 style 按当前 width/eraserRadius 给，currentColor 让选中态下点变白 */
+/* 预设色板：参照图实测 2 行 × 10 列、格 11×11、间距 2。
+   这里用 row-major（定死 10 列），PALETTE 数组顺序就是"上排 10 色、下排 10 色" */
+.snip-swatches {
+  display: grid;
+  grid-template-columns: repeat(10, 11px);
+  grid-auto-rows: 11px;
+  gap: 2px;
+  flex: none;
+  margin-right: 4px;
+}
+
+/* 尺寸圆点按钮：右上角红点提示"可调"（对齐 Snipaste 的 • 按钮）。
+   圆点直径由内联 style 按当前 width/eraserRadius 给，currentColor 让选中态下点变白。
+   在描边/填充、手绘/矩形这类互斥组里，圆点就是其中一项（点击选它，滚轮调数值）；
+   箭头、画笔没有对立体，圆点只读常亮 */
 .snip-wdot {
   position: relative;
-  min-width: 24px;
+  min-width: var(--tb-cell);
 }
 .snip-wdot span {
   display: block;
   border-radius: 999px;
   background: currentColor;
 }
+/* 右上角红点 = "这一格用滚轮调"。三张参照图（框选/记号笔/橡皮擦）实测都是
+   5×5 的实心红圆，距格子上右各 1px，无描边 */
 .snip-wdot::after {
   content: "";
   position: absolute;
@@ -347,32 +409,71 @@ body.settings code {
   height: 5px;
   border-radius: 50%;
   background: #e5533d;
-  border: 1px solid var(--tb-bg);
 }
 
-/* 马克笔/橡皮擦的半透明笔刷示意（参考图里的斜纹方块） */
-.snip-hatch {
-  width: 22px;
-  height: 18px;
-  flex: none;
-  border-radius: 3px;
-  border: 1px solid var(--tb-edge);
-  background: repeating-linear-gradient(
-    45deg,
-    var(--tb-muted) 0 2px,
-    transparent 2px 5px
+/* 只读尺寸读数（线宽只能滚轮改，所以这里不再是按钮）：
+   补回原先由 .snip-btn 提供的盒尺寸与居中，并去掉可点观感 */
+.snip-wdot.static {
+  width: var(--tb-cell);
+  height: var(--tb-cell);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+
+/* 它不再是 .snip-btn，所以激活态的蓝底得自己补一份（跟着亮/暗主题变量走） */
+.snip-wdot.static.on { background: var(--tb-on-bg); color: var(--tb-on-fg); }
+
+/* 网点(dither)形状 —— 参照图实测的「填充 / 矩形模式」图标画法：
+   1px 方点、2px 周期、棋盘交错（conic-gradient 的四分象限天然如此），轮廓 14×12。
+   用 currentColor 是为了选中蓝格上自动翻成白点，不用为状态再写一份样式。 */
+.snip-dither,
+.snip-rectbtn span {
+  display: block;
+  width: 16px;
+  height: 12px;
+  background-image: conic-gradient(
+    currentColor 0 25%, transparent 0 50%, currentColor 0 75%, transparent 0
   );
+  background-size: 2px 2px;
+}
+.snip-dither.rect,
+.snip-rectbtn span { border-radius: 2px; }
+.snip-dither.ellipse { border-radius: 50%; }
+
+/* 矩形模式开关：记号笔/橡皮擦/马赛克填充模式的第二个子属性，格宽与其它格一致 */
+.snip-rectbtn { width: var(--tb-cell); }
+
+/* 箭头样式下拉：符号加粗（—/→/↔ 线条更实），收紧内边距让选中项贴住框体、去掉大空隙 */
+/* 马赛克大小滑块：贴合浅灰属性栏，细轨道 + 蓝色滑块头 */
+.snip-range {
+  width: 84px;
+  height: 24px;
+  margin: 0 2px;
+  accent-color: var(--tb-accent);
+  cursor: pointer;
+  background: transparent;
 }
 
-.snip-astyle { width: 64px; font-size: 14px; text-align: center; }
+.snip-astyle {
+  width: 56px;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  text-align: center;
+  text-align-last: center;
+  padding: 0 2px;
+}
+.snip-astyle option { font-weight: 700; font-size: 16px; }
 
 .snip-chip {
-  height: 22px;
+  height: 24px;
   padding: 0 7px;
   background: transparent;
   color: var(--tb-muted);
   border: 1px solid var(--tb-edge);
-  border-radius: 4px;
+  border-radius: 2px;
   cursor: pointer;
   font-size: 12px;
 }
@@ -383,10 +484,9 @@ body.settings code {
 
 /* 文字样式按钮（B/I/删除线）：图标位用字形本身表达 */
 .snip-tbtn {
-  width: auto;
-  min-width: 22px;
-  padding: 0 5px;
-  font: 13px/1 Georgia, "Times New Roman", serif;
+  width: var(--tb-cell);
+  padding: 0;
+  font: 14px/1 Georgia, "Times New Roman", serif;
 }
 .snip-tbtn.b { font-weight: 700; }
 .snip-tbtn.i { font-style: italic; }
@@ -394,17 +494,17 @@ body.settings code {
 
 /* 字体/字号下拉：贴合浅灰属性栏，别用系统默认白框 */
 .snip-select {
-  height: 22px;
+  height: 24px;
   max-width: 150px;
   background: #fff;
   color: var(--tb-fg-strong);
   border: 1px solid var(--tb-edge);
-  border-radius: 4px;
+  border-radius: 2px;
   font-size: 12px;
   padding: 0 4px;
   cursor: pointer;
 }
-.snip-select:focus { outline: 1px solid var(--tb-on-fg); }
+.snip-select:focus { outline: 1px solid var(--tb-accent); }
 .snip-size { width: 56px; }
 
 /* ---------- 放大镜 ---------- */
@@ -428,11 +528,21 @@ body.settings code {
   border-radius: 3px;
 }
 
+/* 坐标行 (x , y)：居中，白字 */
+.snip-loupe-coords {
+  margin-top: 5px;
+  font: var(--label-font);
+  color: var(--bar-fg);
+  text-align: center;
+}
+
+/* 色块 + 色值：居中一行 */
 .snip-loupe-info {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  margin-top: 5px;
+  margin-top: 3px;
   font: var(--label-font);
 }
 
@@ -450,6 +560,7 @@ body.settings code {
   margin-top: 2px;
   font-size: 10px;
   color: var(--bar-muted);
+  text-align: center;
   white-space: nowrap;
 }
 
@@ -468,6 +579,26 @@ body.settings code {
 }
 
 .snip-label.strong { color: var(--snip-accent); }
+
+/* 尺寸圆点的悬停读数：只在鼠标移入圆点时显示当前值。
+   滚轮不再有跟随光标的气泡，所以这条读数是唯一的可见反馈，别做成常驻。 */
+.snip-wdot .val {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 6px);
+  transform: translateX(-50%);
+  display: none;
+  background: var(--label-bg);
+  color: #fff;
+  font: var(--label-font);
+  padding: 2px 7px;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 70;
+}
+
+.snip-wdot:hover .val { display: block; }
 
 .snip-wintitle {
   position: fixed;

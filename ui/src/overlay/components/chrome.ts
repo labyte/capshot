@@ -7,6 +7,7 @@ export interface ChromeRefs {
   loupe: HTMLDivElement | null;
   loupeCanvas: HTMLCanvasElement | null;
   loupeInfo: HTMLDivElement | null;
+  loupeCoords: HTMLDivElement | null;
   posLabel: HTMLDivElement | null;
   sizeLabel: HTMLDivElement | null;
   winTitle: HTMLDivElement | null;
@@ -19,6 +20,7 @@ export function emptyChromeRefs(): ChromeRefs {
     loupe: null,
     loupeCanvas: null,
     loupeInfo: null,
+    loupeCoords: null,
     posLabel: null,
     sizeLabel: null,
     winTitle: null,

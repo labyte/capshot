@@ -11,7 +11,8 @@ export type ShapeKind =
   | "marker"
   | "text"
   | "mosaic"
-  | "step";
+  | "step"
+  | "erase";
 
 export interface BaseShape {
   id: number;
@@ -23,6 +24,8 @@ export interface RectShape extends BaseShape {
   kind: "rect" | "ellipse";
   r: Rect;
   filled: boolean;
+  /** 记号笔矩形模式：半透明高亮框（无描边），区别于普通矩形 */
+  marker?: boolean;
 }
 
 export type ArrowHead = "solid" | "hollow" | "none";
@@ -57,7 +60,11 @@ export interface TextShape extends BaseShape {
 
 export interface MosaicShape extends BaseShape {
   kind: "mosaic";
+  /** 填充模式：矩形区域打码。线条模式改用 pts+brush，r 由 pts 推得 */
   r: Rect;
+  /** 线条模式：沿折线笔刷打码（brush=笔刷直径物理px） */
+  pts?: Point[];
+  brush?: number;
   style: "pixel" | "blur";
   /** 像素化粒度（1/blocked 缩放），模糊时为模糊半径 px */
   level: number;
@@ -70,13 +77,23 @@ export interface StepShape extends BaseShape {
   radius: number;
 }
 
+/** 橡皮擦：不参与常规绘制，渲染时对标注层做 destination-out 打洞。
+    mode=path 用 pts 折线擦除（width=笔刷直径），mode=rect 用 r 框选擦除 */
+export interface EraseShape extends BaseShape {
+  kind: "erase";
+  mode: "path" | "rect";
+  pts?: Point[];
+  r?: Rect;
+}
+
 export type Shape =
   | RectShape
   | ArrowShape
   | PathShape
   | TextShape
   | MosaicShape
-  | StepShape;
+  | StepShape
+  | EraseShape;
 
 export interface DrawProps {
   color: string;
@@ -92,8 +109,17 @@ export interface DrawProps {
   arrowDouble: boolean;
   /** 箭头头部样式（与单/双端正交） */
   arrowHead: ArrowHead;
+  /** 记号笔：true = 矩形框选高亮，false = 手绘涂抹 */
+  markerRect: boolean;
+  /** 橡皮擦：true = 矩形框选擦除，false = 手绘擦除 */
+  eraserRect: boolean;
+  /** 马赛克：line=沿笔刷线条打码，fill=矩形框选打码 */
+  mosaicMode: "line" | "fill";
   mosaicStyle: "pixel" | "blur";
   mosaicLevel: number;
+  /** 线条模式的笔刷直径（CSS px）。刻意不复用 width：线宽上限 16，
+   *  打码笔刷要粗得多，共用一个字段会让两处 clamp 互相打架。 */
+  mosaicBrush: number;
   stepNo: number;
   stepRadius: number;
   /** 橡皮擦命中半径（CSS px，物理化在 controller 里乘 scale） */
@@ -116,7 +142,8 @@ export const FONT_FAMILIES = [
 export const FONT_SIZES = [12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64];
 
 export const DEFAULT_PROPS: DrawProps = {
-  color: "#ff3b30",
+  // 参照图当前色块实测值，落在 PALETTE 里（默认不显示"自选色"角标）
+  color: "#ed1c24",
   width: 3,
   filled: false,
   fontPx: 18,
@@ -127,39 +154,55 @@ export const DEFAULT_PROPS: DrawProps = {
   textFamily: "Microsoft YaHei UI",
   arrowDouble: false,
   arrowHead: "solid",
+  markerRect: false,
+  eraserRect: false,
+  mosaicMode: "fill",
   mosaicStyle: "pixel",
   mosaicLevel: 8,
+  mosaicBrush: 24,
   stepNo: 1,
   stepRadius: 14,
   eraserRadius: 16,
 };
 
-/** 线宽/尺寸按钮的档位：属性栏用单个圆点循环切换（对齐 Snipaste 的 • 按钮） */
-export const ERASER_SIZES = [10, 16, 24, 36];
-
-/** Snipaste 调色板量级的一排预设 */
+/** Snipaste 预设色板，实测取自 docs/capshot-图/框选.png 的 2 行 × 10 列（PIL 逐格取样）。
+ *  顺序是**行优先**（上排 10 色、下排 10 色），与 .snip-swatches 的 row-major grid 对应。 */
 export const PALETTE = [
-  "#ff3b30",
-  "#ff9500",
-  "#ffcc00",
-  "#34c759",
-  "#00c7be",
-  "#0a84ff",
-  "#5e5ce6",
-  "#af52de",
-  "#ff2d55",
-  "#ffffff",
-  "#8e8e93",
   "#000000",
+  "#7f7f7f",
+  "#880015",
+  "#ed1c24",
+  "#ff7f27",
+  "#fff200",
+  "#22b14c",
+  "#00a2e8",
+  "#3f48cc",
+  "#a349a4",
+  "#ffffff",
+  "#c3c3c3",
+  "#b97a57",
+  "#ffaec9",
+  "#ffc90e",
+  "#efe4b0",
+  "#b5e61d",
+  "#99d9ea",
+  "#7092be",
+  "#c8bfe7",
 ];
-
-export const WIDTHS = [2, 3, 6];
 
 export function shapeBounds(s: Shape): Rect {
   switch (s.kind) {
+    case "mosaic":
+      // 线条模式：包围盒由 pts 推得（外扩半个笔刷）；填充模式：直接用 r
+      if (s.pts && s.pts.length) {
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        for (const p of s.pts) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+        const pad = (s.brush ?? 0) / 2;
+        return { x: x0 - pad, y: y0 - pad, w: x1 - x0 + pad * 2, h: y1 - y0 + pad * 2 };
+      }
+      return s.r;
     case "rect":
     case "ellipse":
-    case "mosaic":
       return s.r;
     case "arrow":
       return {
@@ -187,6 +230,48 @@ export function shapeBounds(s: Shape): Rect {
       return { x: s.at.x - s.radius, y: s.at.y - s.radius, w: s.radius * 2, h: s.radius * 2 };
     case "text":
       return { x: s.at.x, y: s.at.y, w: s.text.length * s.fontPx * 0.6, h: s.fontPx * 1.25 };
+    case "erase":
+      if (s.mode === "rect" && s.r) return s.r;
+      if (s.pts && s.pts.length) {
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        for (const p of s.pts) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+        return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+      }
+      return { x: 0, y: 0, w: 0, h: 0 };
+  }
+}
+
+/**
+ * 「刚画完那一支」的可拖端点（对齐 Snipaste：只有绘制后当场给句柄，点别处即锁死）。
+ * 箭头 = 两端点；画笔 / 记号笔 = 路径首末点（**只动首末，中间点不动** ——
+ * 自由笔迹拉中间点等于把笔迹重采样，那不是"调整"而是"重画"）。
+ * 其余形状返回空数组 = 不可二次编辑。
+ */
+export function shapeEditPoints(s: Shape): Point[] {
+  switch (s.kind) {
+    case "arrow":
+      return [s.a, s.b];
+    case "polyline":
+    case "marker":
+      return s.pts.length < 2 ? [] : [s.pts[0], s.pts[s.pts.length - 1]];
+    default:
+      return [];
+  }
+}
+
+/** 该形状是否支持端点二次编辑（settleShape 用它决定要不要留句柄） */
+export const canEditPoints = (kind: Shape["kind"]): boolean =>
+  kind === "arrow" || kind === "polyline" || kind === "marker";
+
+/** 把第 index 个端点挪到 p（与 shapeEditPoints 的下标约定一一对应） */
+export function moveEditPoint(s: Shape, index: number, p: Point): void {
+  const np = { x: p.x, y: p.y };
+  if (s.kind === "arrow") {
+    if (index === 0) s.a = np;
+    else s.b = np;
+  } else if (s.kind === "polyline" || s.kind === "marker") {
+    if (index === 0) s.pts[0] = np;
+    else s.pts[s.pts.length - 1] = np;
   }
 }
 
@@ -196,9 +281,13 @@ export function translate(s: Shape, dx: number, dy: number): void {
     p.y += dy;
   };
   switch (s.kind) {
+    case "mosaic":
+      s.r.x += dx;
+      s.r.y += dy;
+      s.pts?.forEach(move);
+      break;
     case "rect":
     case "ellipse":
-    case "mosaic":
       s.r.x += dx;
       s.r.y += dy;
       break;
@@ -213,6 +302,10 @@ export function translate(s: Shape, dx: number, dy: number): void {
     case "text":
     case "step":
       move(s.at);
+      break;
+    case "erase":
+      if (s.mode === "rect" && s.r) { s.r.x += dx; s.r.y += dy; }
+      s.pts?.forEach(move);
       break;
   }
 }

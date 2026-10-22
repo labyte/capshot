@@ -2,7 +2,7 @@
 
 import { drawShapes, type RenderDeps } from "../../annotate/render";
 import { shapeBounds, type Shape } from "../../annotate/model";
-import { handlePoints, type Phase, type Rect } from "./types";
+import { handlePoints, type Handle, type Phase, type Point, type Rect } from "./types";
 
 export interface PaintInput {
   frame: ImageBitmap;
@@ -14,11 +14,19 @@ export interface PaintInput {
   /** 已定选区且工具条可见时才画 8 向手柄 */
   showHandles: boolean;
   selectedId: number | null;
+  /** 光标下的已画图形（未点选）：画一层更淡的虚线 bbox 当悬停反馈；null 不画 */
+  hoverId: number | null;
+  /** 光标正压着的手柄：那一格放大一点，作为"可以朝这个方向拉"的反馈；null 无 */
+  hotHandle: Handle | null;
+  /** 「刚画完那一支」的端点句柄（箭头两端 / 笔迹首末点）；空数组 = 无可编辑图形 */
+  editPoints: Point[];
+  /** 光标压着第几个端点；-1 无 */
+  hotEdit: number;
   accent: string;
   maskAlpha: number;
   handleSize: number;
-  /** 橡皮刷圈（物理 px，跟随光标）；null 不画 */
-  eraserRing: { x: number; y: number; r: number } | null;
+  /** 笔刷圈（物理 px，跟随光标）：橡皮与马赛克线条模式共用；null 不画 */
+  brushRing: { x: number; y: number; r: number } | null;
 }
 
 export function paint(
@@ -53,33 +61,54 @@ export function paint(
   ctx.lineWidth = Math.max(1, i.handleSize / 6);
   ctx.strokeRect(x, y, w, h);
 
-  if (i.selectedId !== null) {
-    const s = i.shapes.find((sh) => sh.id === i.selectedId);
-    if (s) {
-      const b = shapeBounds(s);
-      ctx.save();
-      ctx.setLineDash([6, 4]);
-      ctx.lineWidth = Math.max(1, i.handleSize / 8);
-      ctx.strokeStyle = i.accent;
-      ctx.strokeRect(b.x, b.y, b.w, b.h);
-      ctx.restore();
-    }
-  }
+  /* 图形的虚线包围盒：选中态实色，悬停态压淡一档并细一点。
+     两者同一套画法 —— 悬停只是"还没点下去的选中"，不该另发明一种视觉语言。 */
+  const shapeBox = (id: number | null, faint: boolean) => {
+    if (id === null) return;
+    const s = i.shapes.find((sh) => sh.id === id);
+    if (!s) return;
+    const b = shapeBounds(s);
+    ctx.save();
+    if (faint) ctx.globalAlpha = 0.55;
+    ctx.setLineDash([6, 4]);
+    ctx.lineWidth = Math.max(1, i.handleSize / (faint ? 10 : 8));
+    ctx.strokeStyle = i.accent;
+    ctx.strokeRect(b.x, b.y, b.w, b.h);
+    ctx.restore();
+  };
+  shapeBox(i.hoverId === i.selectedId ? null : i.hoverId, true);
+  shapeBox(i.selectedId, false);
 
-  if (i.showHandles) {
-    const hs = i.handleSize;
+  /* 可拖的东西一律画成**圆点**：参照图实测选区手柄是 Ø≈9px 的白底蓝环圆，
+     不是方块。选区八向手柄与图形端点共用这一个画法，
+     免得出现"两种手柄长得不一样"。 */
+  const hs = i.handleSize;
+  const dot = (x: number, y: number, d: number) => {
+    ctx.beginPath();
+    ctx.arc(x, y, d / 2, 0, Math.PI * 2);
     ctx.fillStyle = "#fff";
+    ctx.fill();
     ctx.strokeStyle = i.accent;
     ctx.lineWidth = Math.max(1, hs / 6);
+    ctx.stroke();
+  };
+
+  if (i.showHandles) {
     for (const p of handlePoints(i.sel)) {
-      ctx.fillRect(p.x - hs / 2, p.y - hs / 2, hs, hs);
-      ctx.strokeRect(p.x - hs / 2, p.y - hs / 2, hs, hs);
+      // 光标压着的那一颗放大 25%，配合 *-resize 光标说明"就从这儿拉"
+      dot(p.x, p.y, i.hotHandle === p.k ? hs * 1.25 : hs);
     }
   }
 
-  // 橡皮刷圈：白底 + 深色描边，任何背景都看得见
-  if (i.eraserRing) {
-    const { x, y, r } = i.eraserRing;
+  // 端点句柄不看 showHandles：刚画完那支的持有工具仍是开着的，
+  // 这时候正是唯一能拖端点的窗口
+  i.editPoints.forEach((p, k) => dot(p.x, p.y, i.hotEdit === k ? hs * 1.25 : hs));
+
+  // 笔刷圈（橡皮 / 马赛克线条模式）：白底 + 深色描边，任何背景都看得见。
+  // 此时系统光标被隐藏（controller.updateCursor），所以必须补一个中心十字，
+  // 否则只剩一个圈，小圈时看不出笔刷究竟落在哪个像素上。
+  if (i.brushRing) {
+    const { x, y, r } = i.brushRing;
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fillStyle = "rgba(255,255,255,0.18)";
@@ -90,5 +119,20 @@ export function paint(
     ctx.lineWidth = 1;
     ctx.strokeStyle = "rgba(0,0,0,0.5)";
     ctx.stroke();
+
+    const arm = Math.max(3, r * 0.35);
+    for (const [dark, w] of [
+      ["rgba(0,0,0,0.55)", 3],
+      ["#fff", 1],
+    ] as const) {
+      ctx.strokeStyle = dark;
+      ctx.lineWidth = w;
+      ctx.beginPath();
+      ctx.moveTo(x - arm, y);
+      ctx.lineTo(x + arm, y);
+      ctx.moveTo(x, y - arm);
+      ctx.lineTo(x, y + arm);
+      ctx.stroke();
+    }
   }
 }

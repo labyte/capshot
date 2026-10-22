@@ -3,6 +3,10 @@
 //! · 线：strokeWidth 1.33、round cap/join（lucide 量级，24 稿 ÷1.5 换算）
 //! · 色：一律 currentColor，深浅完全跟随 CSS（.snip-btn / .card-acts button）
 //! 参考稿（24 系）逐点 ÷1.5 落进 16 框；纯几何图形（马赛克格线等）按 12 框重排。
+//!
+//! **别在这里改尺寸找齐参照图**：截图层两条 bar 的图标实际渲染 18px
+//! （theme.css `.snip-bar svg`），12 单位视觉框因此落到 13.5px，正是参照图实测的
+//! 13–15px。图标自身仍按 16 viewBox / 12 单位画，改的是造型不是刻度。
 
 import type { SVGProps } from "react";
 
@@ -28,17 +32,20 @@ function Svg({ size = 16, children, ...rest }: P) {
   );
 }
 
+/** 属性栏「矩形」项：参照图实测是**横向矩形**（16×12px），不是正方形 */
 export const IconRect = (p: P) => (
   <Svg {...p}>
-    <rect x="2" y="2" width="12" height="12" rx="1.33" ry="1.33" />
+    <rect x="1.6" y="3" width="12.8" height="10" rx="1" ry="1" />
   </Svg>
 );
 
-/** 形状工具：圆角矩形 + 圆叠加（主工具条的合并按钮） */
+/** 形状工具（主工具条合并按钮）：方框 + 圆压在**右下角**。
+    参照图实测：圆完整、方框被圆遮住的那段角不画——所以方框是条开口折线，
+    不能用底色填充去遮圆（选中态整格变蓝，遮罩色就对不上了） */
 export const IconShapes = (p: P) => (
   <Svg {...p}>
-    <rect x="2" y="5" width="8.5" height="8.5" rx="1.2" ry="1.2" />
-    <circle cx="10.75" cy="6.25" r="3.25" />
+    <path d="M9.4 6.9V2.6H2.6v6.8h4.3" />
+    <circle cx="10.2" cy="10.1" r="3.3" />
   </Svg>
 );
 
@@ -48,14 +55,18 @@ export const IconEllipse = (p: P) => (
   </Svg>
 );
 
+/* 填充项图标不在这里：参照图实测它是**网点形状**（1px 点 / 2px 周期棋盘），
+   由 theme.css 的 `.snip-dither` 用 conic-gradient 画，形状切换换 class 即可。
+   与记号笔/橡皮擦/马赛克「矩形模式」的网点格共用同一套画法。 */
+
 /* 以下 transform 是「实测包围盒校准」：getBBox 量出视觉尺寸后统一缩到 12–13 带，
    strokeWidth 反向补偿（1.33/scale）保持视觉线宽一致 */
+/** 箭头工具：参照图放大看是**折线杆（上-下-上）+ 末端一个实心三角头**，
+ *  不是直线双头箭。折线表达的是"箭头可以随手画弯"，杆末端藏进头部里 */
 export const IconArrow = (p: P) => (
   <Svg {...p} strokeWidth={1.4}>
-    <g transform="translate(0.4 0.4) scale(0.95)">
-      <path d="M3 13 13 3" />
-      <path d="M7 3h6v6" />
-    </g>
+    <path d="M2.6 11.4 6.2 7.4 8.2 9.6 11.3 5.5" />
+    <path d="M13.8 3 12.9 7 9.8 3.9Z" fill="currentColor" stroke="none" />
   </Svg>
 );
 
@@ -79,20 +90,28 @@ export const IconMarker = (p: P) => (
   </Svg>
 );
 
-/** 文本：iconfont 的 T 字形（横杠 + 竖干，圆头实心）。1024 稿按内容包围盒
-    (746×781) 居中留白压到 ~12 视觉框，实心走 currentColor */
+/** 文字：参照图实测就是最朴素的 T——顶横 12×2、竖干 2×13，无衬线无圆头 */
 export const IconText = (p: P) => (
-  <Svg {...p} viewBox="-8.65 -9.15 1041.3 1041.3" fill="currentColor" stroke="none">
-    <path d="M885.005342 152.185075c0 16.95823-13.750165 30.707372-30.709419 30.707372L169.703053 182.892447c-16.95823 0-30.708396-13.749142-30.708396-30.707372l0 0c0-16.959254 13.750165-30.708396 30.708396-30.708396l684.59287 0C871.255177 121.475656 885.005342 135.224798 885.005342 152.185075L885.005342 152.185075 885.005342 152.185075zM512.002047 902.523321c-16.963347 0-30.708396-13.745049-30.708396-30.707372L481.293651 153.189961c0-16.959254 13.746072-30.708396 30.708396-30.708396l0 0c16.95823 0 30.704302 13.749142 30.704302 30.708396l0 718.630081C542.706349 888.778272 528.960277 902.523321 512.002047 902.523321L512.002047 902.523321 512.002047 902.523321z" />
+  <Svg {...p} strokeWidth={2}>
+    <path d="M2.8 3.2h10.4M8 3.2v10.2" />
   </Svg>
 );
 
-/** 马赛克：用户指定的 iconfont 资产（1024 viewBox，圆角框 + 旋涡切块）。
-    资产原稿 path 上写死的 #000000 已去掉，颜色统一走 currentColor */
+/** 马赛克：参照图实测是**方框内 2×2 棋盘**（左上、右下两格实心），不是旋涡切块 */
 export const IconMosaic = (p: P) => (
-  /* viewBox 四周留白：原稿内容满幅 1024，直接渲染=16 单位，压到 12 */
-  <Svg {...p} viewBox="-170.67 -170.67 1365.34 1365.34" fill="currentColor" stroke="none">
-    <path d="M948.167111 0H75.207111C33.792 0 0 33.792 0 75.207111v873.585778C0 990.208 33.792 1024 75.207111 1024h873.585778c41.415111 0 75.207111-33.792 75.207111-75.207111V75.207111A76.288 76.288 0 0 0 948.167111 0z m24.234667 511.658667H511.658667v460.743111h-393.102223c-36.977778 0-67.584-30.606222-67.584-67.584v-393.102222h460.686223V50.915556h393.159111c36.977778 0 67.584 30.606222 67.584 67.527111v393.159111z" />
+  <Svg {...p}>
+    <rect x="2.2" y="2.2" width="11.6" height="11.6" rx="1" ry="1" />
+    <rect x="2.6" y="2.6" width="5.6" height="5.6" fill="currentColor" stroke="none" />
+    <rect x="8.2" y="8.2" width="5.6" height="5.6" fill="currentColor" stroke="none" />
+  </Svg>
+);
+
+/** 模糊样式：三条波浪线，与 IconMosaic 的方格成对（马赛克属性栏互斥单选） */
+export const IconBlur = (p: P) => (
+  <Svg {...p} strokeWidth={1.2}>
+    <path d="M2.5 4.5c1.8-1.9 3.7 1.9 5.5 0s3.7 1.9 5.5 0" />
+    <path d="M2.5 8c1.8-1.9 3.7 1.9 5.5 0s3.7 1.9 5.5 0" />
+    <path d="M2.5 11.5c1.8-1.9 3.7 1.9 5.5 0s3.7 1.9 5.5 0" />
   </Svg>
 );
 
@@ -103,25 +122,23 @@ export const IconStep = (p: P) => (
   </Svg>
 );
 
+/* 撤销/重做：参照图实测是**实心**弯箭头（14×15），所以头部用实心三角、
+   尾巴用加粗描边；比工具图标浅一档的墨色由 .snip-btn.muted 给 */
 export const IconUndo = (p: P) => (
-  <Svg {...p} strokeWidth={1.02}>
-    <g transform="translate(-2.4 -2.37) scale(1.3)">
-      <path d="M5.6 5.2h4.4a3 3 0 0 1 0 6H6.2" />
-      <path d="M7.9 2.9 5.2 5.2l2.7 2.3" />
-    </g>
+  <Svg {...p} strokeWidth={2.1}>
+    <path d="M6.6 5.7h3.1a2.7 2.7 0 0 1 0 5.4H7.1" />
+    <path d="M9.1 2.5 4.6 6.15 9.1 9.8Z" fill="currentColor" stroke="none" />
   </Svg>
 );
 
 export const IconRedo = (p: P) => (
-  <Svg {...p} strokeWidth={1.02}>
-    <g transform="translate(-2.4 -2.37) scale(1.3)">
-      <path d="M10.4 5.2H6a3 3 0 0 0 0 6h3.8" />
-      <path d="M8.1 2.9l2.7 2.3-2.7 2.3" />
-    </g>
+  <Svg {...p} strokeWidth={2.1}>
+    <path d="M9.4 5.7H6.3a2.7 2.7 0 0 0 0 5.4h2.6" />
+    <path d="M6.9 2.5 11.4 6.15 6.9 9.8Z" fill="currentColor" stroke="none" />
   </Svg>
 );
 
-/** 图钉：实心 + 45° 斜插（钉尖朝左下）。旋转后包围盒达 16，再缩 0.78 压回 12.5 */
+/** 图钉：实心 + 45° 斜插（钉尖朝左下）。旋转后包围盒达 16，再缩 0.88 压回 12.5 */
 export const IconPin = (p: P) => (
   <Svg {...p} fill="currentColor" stroke="none">
     <g transform="translate(8 8) scale(0.88) translate(-8 -8) rotate(45 8 8)">
@@ -131,12 +148,14 @@ export const IconPin = (p: P) => (
   </Svg>
 );
 
-/** 折角软盘（存盘） */
+/** 软盘（存盘）：参照图是**实心**盘体 + 两处白窗（上方快门槽、下方标签带），
+ *  用 evenodd 把两个窗挖出来，选中蓝格上窗就是蓝的，不用为状态另写颜色 */
 export const IconSave = (p: P) => (
-  <Svg {...p}>
-    <path d="M2.4 2.4h8.4l2.8 2.8v8.4H2.4z" />
-    <path d="M5.2 2.4v3.6h5.2V2.4" opacity=".7" />
-    <rect x="5.2" y="8.9" width="5.6" height="4.7" />
+  <Svg {...p} fill="currentColor" stroke="none">
+    <path
+      fillRule="evenodd"
+      d="M2.2 2.2h8.8l2.8 2.8v8.8H2.2Z M5.8 3h3.6v3.2H5.8Z M4.6 9.2h6.8v3.6H4.6Z"
+    />
   </Svg>
 );
 
@@ -148,11 +167,10 @@ export const IconCopy = (p: P) => (
   </Svg>
 );
 
+/** 关闭：参照图实测臂厚约 2px、X 本体 10×10 */
 export const IconClose = (p: P) => (
-  <Svg {...p} strokeWidth={1.23}>
-    <g transform="translate(-0.64 -0.64) scale(1.08)">
-      <path d="M2.9 2.9 13.1 13.1M13.1 2.9 2.9 13.1" />
-    </g>
+  <Svg {...p} strokeWidth={1.9}>
+    <path d="M4.2 4.2 11.8 11.8M11.8 4.2 4.2 11.8" />
   </Svg>
 );
 

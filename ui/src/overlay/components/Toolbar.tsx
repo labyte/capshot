@@ -28,9 +28,10 @@ const TOOLS: { id: ToolId; label: string; key: string; Icon: typeof IconRect; so
   { id: "rect", label: "形状", key: "V", Icon: IconShapes },
   { id: "arrow", label: "箭头", key: "P", Icon: IconArrow },
   { id: "polyline", label: "画笔", key: "L", Icon: IconPen, soft: true },
-  { id: "marker", label: "马克笔", key: "M", Icon: IconMarker },
-  { id: "text", label: "文字", key: "T", Icon: IconText },
+  { id: "marker", label: "记号笔", key: "M", Icon: IconMarker },
+  // 顺序对齐参照图（docs/testing-windows.md 界面设计 §2）：马赛克在文字之前
   { id: "mosaic", label: "马赛克", key: "X", Icon: IconMosaic },
+  { id: "text", label: "文字", key: "T", Icon: IconText },
   { id: "step", label: "序号", key: "N", Icon: IconStep },
   { id: "eraser", label: "橡皮擦", key: "E", Icon: IconEraser },
 ];
@@ -90,8 +91,9 @@ export default function Toolbar({
           );
         })}
         <span className="snip-sep" />
+        {/* 撤销/重做：参照图实测墨色比工具图标浅一档（#7b7b7b），走 .muted */}
         <button
-          className="snip-btn"
+          className="snip-btn muted"
           title="撤销 (Ctrl+Z)"
           disabled={!s.canUndo}
           onClick={act(() => ctrl.undo())}
@@ -99,7 +101,7 @@ export default function Toolbar({
           <IconUndo />
         </button>
         <button
-          className="snip-btn"
+          className="snip-btn muted"
           title="重做 (Ctrl+Y)"
           disabled={!s.canRedo}
           onClick={act(() => ctrl.redo())}

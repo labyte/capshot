@@ -19,6 +19,12 @@ export default function Magnifier({ chrome }: { chrome: ChromeBag }) {
         }}
       />
       <div
+        className="snip-loupe-coords"
+        ref={(el) => {
+          chrome.current.loupeCoords = el;
+        }}
+      />
+      <div
         className="snip-loupe-info"
         ref={(el) => {
           chrome.current.loupeInfo = el;
@@ -27,7 +33,8 @@ export default function Magnifier({ chrome }: { chrome: ChromeBag }) {
         <span className="snip-loupe-chip" />
         <span className="snip-loupe-text" />
       </div>
-      <div className="snip-loupe-hint">Alt 放大 · C 复制颜色 · Shift+C 切 HEX</div>
+      <div className="snip-loupe-hint">按 C 复制颜色值</div>
+      <div className="snip-loupe-hint">按 Shift 切换 RGB/HEX</div>
     </div>
   );
 }

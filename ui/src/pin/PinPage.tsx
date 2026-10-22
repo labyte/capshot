@@ -239,7 +239,8 @@ export default function PinPage() {
     async (op: "copy" | "save") => {
       if (!boot) return;
       try {
-        await invoke("export_result", { req: { sel: boot.sel, op } });
+        const res = await invoke<{ cancelled?: boolean }>("export_result", { req: { sel: boot.sel, op } });
+        if (res?.cancelled) return; // 另存为被取消：不提示
         toast(op === "copy" ? "已复制" : "已保存");
       } catch (e) {
         toast("失败：" + String((e as Error)?.message ?? e));
