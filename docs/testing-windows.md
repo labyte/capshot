@@ -340,6 +340,11 @@ cmd / PowerShell 里运行：
 | 32 | 工具条形状图标 | **横向矩形 + 椭圆**，不是正方形 + 正圆 | 参照图实测：矩形 13×11、椭圆 14×9，两个都不是正方/正圆。`IconShapes` 改为 `path`（缺右下角的横向矩形）+ `ellipse rx3.6 ry2.7` | 已改 |
 | 34 | 图形句柄外观 | 录屏：图形句柄是**白底深边空心小方块**，选区手柄是**蓝色实心圆点** | 两种形状刻意区分"调图形/调选区"，故 `painter` 里图形句柄不再复用 `dot()`，另画 fillRect+strokeRect；压中的那颗放大 ~27% | 已改 |
 | 36 | 句柄存活时属性栏同步 | 第二段录屏：描边/填充/矩形/椭圆/颜色都改到"刚画完那一支"，换形状时句柄不消失 | `fillTarget()` 统一描边填充的落点；`setTool` 加就地换 kind 分支；颜色线宽走 `applyPropsToEditable`（上一条已覆盖 rect/ellipse） | 已改 |
+| 43 | 指针移出画布后双光标 | 移到工具条/属性栏上时，自绘十字与系统手型光标同时存在 | `onPointerLeave` 里置了 `pointerIn=false` 却**没重算光标**；而画布此后再收不到 `pointermove`，`drawCross` 一直停在 true → 十字冻在画布上。修法：leave 里补一次 `updateCursor()` |
+| 44 | 记号笔光标 | **实心圆**（不是空心环） | `toolCursor()` 新增 `dot` 分支：半透明当前色实心 + 一圈实边（与它画的高亮同观感），直径仍 ~15px 固定 |
+| 45 | 文字工具光标 | 定位时就该是输入光标（I 梁） | `updateCursor` 把 `s.tool === "text"` 与 `pendingTextAt` 并列给 `text`，不再走自绘十字 |
+| 46 | 马赛克光标 | **实心 + 虚线边** | `toolCursor()` 新增 `dashDot` 分支：中性灰实心 + 白晕/深虚线双描边（打码不涉及颜色），环径仍随笔刷 8–80 实时变 |
+| 47 | 橡皮擦光标 | 描边（圆头）模式=描边圆，否则=十字 | **已是此行为**：`eraser && !eraserRect` → `ring`；矩形模式无自绘光标 → 落回细十字。此处只把规则钉死 |
 | 40 | **取色态光标消失** | 自己引入的 bug | 十字改成自绘后，`paint()` 在 picking / 无选区两种情况下提前 `return`，而光标层画在函数末尾 → 系统光标已被置 `none`、自绘的又没画，指针整个不见。修法：光标层拆成 `paintCursor()` 由 `draw()` 在 `paint()` 之后无条件调用 |
 | 41 | 手柄区光标互斥 | 移入手柄/句柄区域只给选择光标，不要和绘制光标同屏 | `updateCursor` 把 `hotEdit`/`hotHandle` 两判提到 `toolCursor()` 之前；`draw()` 里 `grabHandle` 为真时 `toolCursor`/`cross` 一律传 null |
 | 42 | 画笔光标 | 与箭头同步（圆点+四向短线、当前色、点径随线宽） | `toolCursor()` 让 polyline 走 `dotTicks` 同一分支；同时按用户要求**去掉白色描边**，圆点与短线纯当前色 |

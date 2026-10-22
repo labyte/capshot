@@ -30,7 +30,13 @@ export interface PaintInput {
    * ring = 笔刷圈（橡皮圆头 / 马赛克线条 / 记号笔）；
    * dotTicks = 圆点 + 四向短线（箭头），点用**当前标注色**、直径随线宽变。
    */
-  toolCursor: { x: number; y: number; r: number; kind: "ring" | "dotTicks"; color: string } | null;
+  toolCursor: {
+    x: number;
+    y: number;
+    r: number;
+    kind: "ring" | "dotTicks" | "dot" | "dashDot";
+    color: string;
+  } | null;
   /** 自绘细十字（arm=半长，物理 px）。系统 crosshair 太粗太大时用它，null = 不画 */
   cross: { x: number; y: number; arm: number } | null;
 }
@@ -145,6 +151,39 @@ export function paintCursor(ctx: CanvasRenderingContext2D, i: PaintInput): void 
       ctx.lineWidth = 1;
       ctx.strokeStyle = "rgba(0,0,0,0.5)";
       ctx.stroke();
+    } else if (kind === "dot") {
+      // 记号笔：实心工具圆（用户指定实心）。半透明当前色 + 一圈实边，
+      // 与它画出来的高亮同一个观感，浅底深底都看得见。
+      const rr = Math.max(3, r);
+      ctx.save();
+      ctx.globalAlpha = 0.55;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(x, y, rr, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = color;
+      ctx.beginPath();
+      ctx.arc(x, y, rr, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (kind === "dashDot") {
+      /* 马赛克：实心 + 虚线边（用户指定）。打码不涉及颜色，所以用中性灰填充 +
+         白晕深虚线双描边 —— 深浅截图上都要看得见。环径仍随笔刷直径实时变。 */
+      const rr = Math.max(4, r);
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(x, y, rr, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(128,128,128,0.35)";
+      ctx.fill();
+      ctx.setLineDash([Math.max(2, rr * 0.35), Math.max(2, rr * 0.3)]);
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "rgba(255,255,255,0.85)";
+      ctx.stroke();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = "rgba(0,0,0,0.7)";
+      ctx.stroke();
+      ctx.restore();
     } else {
       /* 箭头 / 画笔：圆点 + 四向短线，**纯当前标注色，不加白描边**（用户要求：
          白晕在浅底上反而糊成一团）。点径随线宽实时变（录屏 t=86 大点 ↔ t=130 小点）。 */

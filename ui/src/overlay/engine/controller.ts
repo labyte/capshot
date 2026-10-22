@@ -388,17 +388,18 @@ export class OverlayController {
    *   查无实据（官方包里无任何光标图资源），已撤回
    * - 矩形模式（markerRect / eraserRect）与形状类工具一律系统十字
    */
-  private toolCursor(): { kind: "ring" | "dotTicks"; r: number } | null {
+  private toolCursor(): { kind: "ring" | "dotTicks" | "dot" | "dashDot"; r: number } | null {
     const s = this.state;
     if (s.phase !== "adjusting" && s.phase !== "tool-drawing") return null;
     const sc = this.scale;
     const p = s.props;
     if (s.tool === "eraser" && !p.eraserRect) return { kind: "ring", r: p.eraserRadius * sc };
+    // 马赛克：实心 + 虚线边（用户指定），环径仍随笔刷直径实时变
     if (s.tool === "mosaic" && p.mosaicMode === "line") {
-      return { kind: "ring", r: (p.mosaicBrush * sc) / 2 };
+      return { kind: "dashDot", r: (p.mosaicBrush * sc) / 2 };
     }
-    // 记号笔：固定工具圈（录屏实测直径 ~15px @100%，与线宽无关）
-    if (s.tool === "marker" && !p.markerRect) return { kind: "ring", r: 7.5 * sc };
+    // 记号笔：**实心**工具圆（直径 ~15px @100%，与线宽无关，用户指定实心）
+    if (s.tool === "marker" && !p.markerRect) return { kind: "dot", r: 7.5 * sc };
     /* 箭头：圆点 + 四向短线，点径随线宽实时变、颜色用当前标注色（录屏 t=86/130/134：
        红色大点 → 红色小点，正是滚轮改线宽的前后两态）。
        上一轮我拿 t=83（矩形工具拖角）和 t=127（箭头已定稿）当成了箭头光标，样本取错，
@@ -642,7 +643,8 @@ export class OverlayController {
     else if (this.hotHandle) c = CURSOR_FOR_HANDLE[this.hotHandle];
     // 该工具要自绘光标（笔刷圈 / 圆点短线）时隐藏系统光标，避免两个光标打架
     else if (this.toolCursor()) c = "none";
-    else if (s.pendingTextAt) c = "text";
+    // 文字工具：定位时就是 I 梁（"这里能打字"），不该还是个十字
+    else if (s.tool === "text" || s.pendingTextAt) c = "text";
     else if (s.phase === "adjusting" && p) {
       if (!s.tool && (this.hoverShapeId !== null || this.inSel(p))) c = "move";
     }
@@ -863,6 +865,10 @@ export class OverlayController {
     this.pointerIn = false;
     // 只在没按下时清：拖拽中指针飞出画布是常事，锚点还得留着继续算
     if (!this.anchor) this.clearHover();
+    /* 必须在这里重算一次光标：指针移到工具条/属性栏上之后，画布再也收不到
+       pointermove，不主动调 updateCursor 的话 drawCross 一直停在 true ——
+       自绘十字冻在画布上，与 chrome 自己的手型/箭头光标同时出现。 */
+    this.updateCursor();
   };
 
   private onPointerUp = (e: PointerEvent) => {
