@@ -280,7 +280,7 @@ export default function PropertyBar({
         )}
 
         {/* 马赛克四组（对齐参照图，无颜色板）：①线条模式（笔刷打码，滚轮调粗细）
-            ②填充模式（矩形框选）—— ①②互斥；③马赛克/模糊样式 —— 两个图标按钮互斥，
+            ②填充模式（矩形框选）—— ①②互斥；③马赛克/模糊样式 —— **一个按钮**，图标即当前样式、再点切换，
             不再是文字 chip；④大小滑块 + 数值读数 */}
         {t === "mosaic" && (
           <>
@@ -301,19 +301,21 @@ export default function PropertyBar({
               <span />
             </button>
             <span className="snip-sep" />
+            {/* 打码样式：**一个按钮**，图标就是当前样式，再点一下在马赛克⇄模糊之间切换
+                （用户要求，也少一个元素）。图标本身吃 mosaicLevel ——
+                拖粒度时格子粗细 / 波纹起伏当场跟着变，所以不加 .on 高亮。 */}
             <button
-              className={"snip-btn" + (p.mosaicStyle === "pixel" ? " on" : "")}
-              title="马赛克（像素方块化）"
-              onClick={() => ctrl.setProps({ mosaicStyle: "pixel" })}
+              className="snip-btn"
+              title={`打码样式：${p.mosaicStyle === "pixel" ? "马赛克（像素方块化）" : "模糊（柔化）"}（点击切换）`}
+              onClick={() =>
+                ctrl.setProps({ mosaicStyle: p.mosaicStyle === "pixel" ? "blur" : "pixel" })
+              }
             >
-              <IconMosaic />
-            </button>
-            <button
-              className={"snip-btn" + (p.mosaicStyle === "blur" ? " on" : "")}
-              title="模糊（柔化）"
-              onClick={() => ctrl.setProps({ mosaicStyle: "blur" })}
-            >
-              <IconBlur />
+              {p.mosaicStyle === "pixel" ? (
+                <IconMosaic level={p.mosaicLevel} />
+              ) : (
+                <IconBlur level={p.mosaicLevel} />
+              )}
             </button>
             <input
               className="snip-range"

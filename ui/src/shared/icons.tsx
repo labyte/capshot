@@ -97,23 +97,48 @@ export const IconText = (p: P) => (
   </Svg>
 );
 
-/** 马赛克：参照图实测是**方框内 2×2 棋盘**（左上、右下两格实心），不是旋涡切块 */
-export const IconMosaic = (p: P) => (
-  <Svg {...p}>
-    <rect x="2.2" y="2.2" width="11.6" height="11.6" rx="1" ry="1" />
-    <rect x="2.6" y="2.6" width="5.6" height="5.6" fill="currentColor" stroke="none" />
-    <rect x="8.2" y="8.2" width="5.6" height="5.6" fill="currentColor" stroke="none" />
-  </Svg>
-);
+/**
+ * 打码样式的两个图标（马赛克属性栏里是**同一个按钮的两种态**，不是两个互斥按钮）：
+ * 都吃 `level`，粒度一变图标本身就跟着变 —— 马赛克看格子粗细、模糊看波纹起伏。
+ */
+export const IconMosaic = ({ level = 8, ...p }: P & { level?: number }) => {
+  // 参照图实测：方框内棋盘格。level 越大格越粗 → 每边格数递减
+  const n = Math.max(2, Math.min(6, 7 - Math.round(level / 7)));
+  const cell = 11.6 / n;
+  const cells = [];
+  for (let r = 0; r < n; r++)
+    for (let c = 0; c < n; c++)
+      if ((r + c) % 2 === 0)
+        cells.push(
+          <rect
+            key={`${r}x${c}`}
+            x={2.2 + c * cell}
+            y={2.2 + r * cell}
+            width={cell}
+            height={cell}
+            fill="currentColor"
+            stroke="none"
+          />,
+        );
+  return (
+    <Svg {...p}>
+      <rect x="2.2" y="2.2" width="11.6" height="11.6" rx="1" ry="1" />
+      {cells}
+    </Svg>
+  );
+};
 
-/** 模糊样式：三条波浪线，与 IconMosaic 的方格成对（马赛克属性栏互斥单选） */
-export const IconBlur = (p: P) => (
-  <Svg {...p} strokeWidth={1.2}>
-    <path d="M2.5 4.5c1.8-1.9 3.7 1.9 5.5 0s3.7 1.9 5.5 0" />
-    <path d="M2.5 8c1.8-1.9 3.7 1.9 5.5 0s3.7 1.9 5.5 0" />
-    <path d="M2.5 11.5c1.8-1.9 3.7 1.9 5.5 0s3.7 1.9 5.5 0" />
-  </Svg>
-);
+export const IconBlur = ({ level = 8, ...p }: P & { level?: number }) => {
+  // 波纹起伏与线宽随模糊半径变大，拖动滑块时"糊"的程度当场可见
+  const a = Math.max(1, Math.min(2.8, 0.9 + level / 16));
+  return (
+    <Svg {...p} strokeWidth={1 + a * 0.25}>
+      {[4.5, 8, 11.5].map((y) => (
+        <path key={y} d={`M2.5 ${y} c1.8 ${-a} 3.7 ${a} 5.5 0 s3.7 ${a} 5.5 0`} />
+      ))}
+    </Svg>
+  );
+};
 
 export const IconStep = (p: P) => (
   <Svg {...p}>
