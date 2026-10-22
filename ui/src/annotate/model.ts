@@ -292,6 +292,25 @@ export function shapeHandles(s: Shape): ShapeHandle[] {
 }
 
 /**
+ * 端点句柄的"可拉方向"：指向它的相邻点。用于挑一个方向缩放光标
+ * （录屏实测箭头端点悬停是方向箭头，不是抓手）。8 向句柄返回 null —— 它们本身就是方向。
+ */
+export function shapeHandleDir(s: Shape, k: string): Point | null {
+  if (s.kind === "arrow") {
+    const [me, other] = k === "a" ? [s.a, s.b] : k === "b" ? [s.b, s.a] : [null, null];
+    return me && other ? { x: other.x - me.x, y: other.y - me.y } : null;
+  }
+  if (s.kind === "polyline" || s.kind === "marker") {
+    const n = s.pts.length;
+    if (n < 2) return null;
+    if (k === "first") return { x: s.pts[1].x - s.pts[0].x, y: s.pts[1].y - s.pts[0].y };
+    if (k === "last")
+      return { x: s.pts[n - 1].x - s.pts[n - 2].x, y: s.pts[n - 1].y - s.pts[n - 2].y };
+  }
+  return null;
+}
+
+/**
  * 拖某个句柄。点类（箭头端点、笔迹首末）直接把点落过去；矩形/椭圆走 `resizeRect` ——
  * 与选区缩放**同一份实现**，且从按下时的原矩形重算（不累加增量），
  * 免得一路拖下去越拖越漂。

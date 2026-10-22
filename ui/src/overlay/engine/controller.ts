@@ -13,6 +13,7 @@ import {
   canEditShape,
   DEFAULT_PROPS,
   type DrawProps,
+  shapeHandleDir,
   type Shape,
   shapeHandles,
 } from "../../annotate/model";
@@ -24,6 +25,7 @@ import {
   moveRect,
   norm,
   rectEq,
+  resizeHandleFor,
   resizeRect,
   type Handle,
   type Phase,
@@ -572,6 +574,18 @@ export class OverlayController {
     return this.state.shapes.find((x) => x.id === this.editId) ?? null;
   }
 
+  /**
+   * 句柄该给什么光标。8 向句柄的 key 本身就是方向（nw..w），直接用；
+   * 端点句柄（箭头两端 / 笔迹首末）按"指向相邻点"的轴向挑最接近的方向缩放光标 ——
+   * 录屏 t=90 实测箭头端点悬停是方向箭头，不是抓手。
+   */
+  private editCursor(key: string): string {
+    if (key in CURSOR_FOR_HANDLE) return CURSOR_FOR_HANDLE[key as Handle];
+    const sh = this.editableShape();
+    const d = sh ? shapeHandleDir(sh, key) : null;
+    return d ? CURSOR_FOR_HANDLE[resizeHandleFor(d.x, d.y)] : "move";
+  }
+
   /** 交还「可编辑」状态：起新笔、切工具、退回、undo/redo 都要调 */
   private releaseEditHandles(): void {
     if (this.editId === null && this.hotEdit === null) return;
@@ -594,13 +608,10 @@ export class OverlayController {
     const a = this.anchor;
     let c = "crosshair";
     if (a?.mode === "resize") c = CURSOR_FOR_HANDLE[a.handle];
-    else if (a?.mode === "shape-edit")
-      // 拖图形的 8 向句柄时给方向缩放光标，拖端点时给抓手
-      c = a.key in CURSOR_FOR_HANDLE ? CURSOR_FOR_HANDLE[a.key as Handle] : "move";
+    else if (a?.mode === "shape-edit") c = this.editCursor(a.key);
     else if (a?.mode === "move" || a?.mode === "shape-move") c = "move";
     // 压在「刚画完那支」的句柄上：此时工具还开着（默认是十字），但这一格该给反馈
-    else if (this.hotEdit)
-      c = this.hotEdit in CURSOR_FOR_HANDLE ? CURSOR_FOR_HANDLE[this.hotEdit as Handle] : "move";
+    else if (this.hotEdit) c = this.editCursor(this.hotEdit);
     // 该工具要自绘笔刷圈（橡皮圆头 / 马赛克线条 / 画笔）时隐藏系统光标，
     // 避免圈+十字双光标打架；矩形模式、形状类工具仍用十字
     else if (this.brushRadius() !== null) c = "none";

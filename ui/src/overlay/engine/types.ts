@@ -38,6 +38,17 @@ export const norm = (x0: number, y0: number, dx: number, dy: number): Rect => ({
 export const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 
 /**
+ * 给一个方向向量，挑最接近的**方向缩放光标**（45° 一档，共 8 档）。
+ * 端点句柄（箭头两端、笔迹首末）没有现成的 nw..w 身份，但它该给的光标就是
+ * "沿这支箭的轴向拉" —— 录屏 t=90 实测箭头端点悬停确实是方向箭头而非抓手。
+ */
+export function resizeHandleFor(dx: number, dy: number): Handle {
+  const deg = (Math.atan2(dy, dx) * 180) / Math.PI; // 0 = →，90 = ↓（屏幕坐标）
+  const order: Handle[] = ["e", "se", "s", "sw", "w", "nw", "n", "ne"];
+  return order[Math.round((((deg % 360) + 360) % 360) / 45) % 8];
+}
+
+/**
  * 按手柄方向缩放矩形：w/e 动 x 与 w，n/s 动 y 与 h，最后归一化掉负宽高。
  * **选区的 8 向手柄与图形（矩形/椭圆）的 8 向句柄共用这一份** ——
  * 两处算法必须一致，否则同一个手柄在两个地方拉出来的手感不一样。

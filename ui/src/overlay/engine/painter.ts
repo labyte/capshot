@@ -100,9 +100,19 @@ export function paint(
     }
   }
 
-  // 图形句柄不看 showHandles：刚画完那支时工具仍是开着的，
-  // 而这正是唯一能拖句柄的窗口。矩形/椭圆的 8 向与选区手柄同一画法（同款圆点）
-  i.editHandles.forEach((h) => dot(h.x, h.y, i.hotEdit === h.k ? hs * 1.25 : hs));
+  /* 图形句柄不看 showHandles：刚画完那支时工具仍是开着的，这正是唯一能拖句柄的窗口。
+     录屏实测：图形句柄是**白底深边的空心小方块**，而选区手柄是**蓝色实心圆点** ——
+     Snipaste 刻意用两种形状区分"调图形"和"调选区"，所以这里不复用上面的 dot()。 */
+  if (i.editHandles.length) {
+    ctx.fillStyle = "#fff";
+    ctx.strokeStyle = "rgba(40,40,40,0.9)";
+    ctx.lineWidth = Math.max(1, hs / 9);
+    for (const h of i.editHandles) {
+      const sz = i.hotEdit === h.k ? hs * 0.95 : hs * 0.75;
+      ctx.fillRect(h.x - sz / 2, h.y - sz / 2, sz, sz);
+      ctx.strokeRect(h.x - sz / 2, h.y - sz / 2, sz, sz);
+    }
+  }
 
   /* 自绘工具圈（此时系统光标被 controller 置成 none，见 brushRadius）：
      橡皮圆头 / 马赛克线条（环径=笔刷尺寸）+ 记号笔（固定 ~15px）。
