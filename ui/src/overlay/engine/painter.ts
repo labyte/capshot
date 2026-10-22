@@ -27,6 +27,8 @@ export interface PaintInput {
   handleSize: number;
   /** 自绘笔刷圈（物理 px，跟随光标；r=半径），null = 用系统光标 */
   brushCursor: { x: number; y: number; r: number } | null;
+  /** 自绘细十字（arm=半长，物理 px）。系统 crosshair 太粗太大时用它，null = 不画 */
+  cross: { x: number; y: number; arm: number } | null;
 }
 
 export function paint(
@@ -131,5 +133,30 @@ export function paint(
     ctx.lineWidth = 1;
     ctx.strokeStyle = "rgba(0,0,0,0.5)";
     ctx.stroke();
+  }
+
+  /* 自绘细十字（取代系统 crosshair：那枚约 19px、2px 黑线，太粗太大）。
+     录屏实测 Snipaste 是 15px / 1px —— 1px 黑线 + 白晕影，中心正落在指针热点上。
+     坐标 +0.5 让 1px 线压在像素中心，否则会被抗锯齿糊成 2px 灰线。 */
+  if (i.cross) {
+    const { x, y, arm } = i.cross;
+    const px = Math.round(x) + 0.5;
+    const py = Math.round(y) + 0.5;
+    ctx.save();
+    ctx.lineCap = "butt";
+    for (const [col, w] of [
+      ["rgba(255,255,255,0.8)", 3],
+      ["#000", 1],
+    ] as const) {
+      ctx.strokeStyle = col;
+      ctx.lineWidth = w;
+      ctx.beginPath();
+      ctx.moveTo(px - arm, py);
+      ctx.lineTo(px + arm, py);
+      ctx.moveTo(px, py - arm);
+      ctx.lineTo(px, py + arm);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 }

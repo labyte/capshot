@@ -60,9 +60,9 @@ export default function PropertyBar({
           ? { on: !p.eraserRect, name: "手绘擦除", pick: () => ctrl.setProps({ eraserRect: false }) }
           : null;
 
-  /** 填充项画的是哪个形状：跟随矩形⇄椭圆；未选工具但点选了已画图形时跟随那个图形 */
-  const fillEllipse =
-    t === "ellipse" || (!t && s.shapes.find((x) => x.id === s.selectedId)?.kind === "ellipse");
+  /** 填充项/网点画哪个形状：ctrl.fillState().kind 已经排好优先级
+   *  （点选的图形 > 刚画完带句柄的那支 > 当前工具），这里只照它渲染 */
+  const fillEllipse = fill.kind === "ellipse";
   const fillName = fillEllipse ? "椭圆" : "矩形";
 
   /**

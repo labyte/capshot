@@ -13,6 +13,7 @@ import {
   canEditShape,
   DEFAULT_PROPS,
   type DrawProps,
+  type RectShape,
   shapeHandleDir,
   type Shape,
   shapeHandles,
@@ -141,6 +142,10 @@ export class OverlayController {
   private editId: number | null = null;
   /** 光标当前压着 editId 那支的哪个句柄（"a"/"b"/"first"/"last"/"nw"…"w"）；null = 没压着 */
   private hotEdit: string | null = null;
+  /** 指针在画布内吗：自绘十字只在画布内画，移到工具条上就该消失 */
+  private pointerIn = false;
+  /** 这一帧要不要自绘细十字（updateCursor 顺带算，画布与光标因此不会各说各话） */
+  private drawCross = false;
   /** store 订阅里挂 updateCursor —— 见 bind() 的注释 */
   private unsubCursor: (() => void) | null = null;
   private spaceHeld = false;
@@ -429,6 +434,11 @@ export class OverlayController {
           ring !== null && this.pointer
             ? { x: this.pointer.x, y: this.pointer.y, r: ring }
             : null,
+        // 自绘细十字（取代系统那枚又粗又大的 IDC_CROSS）
+        cross:
+          this.drawCross && this.pointer
+            ? { x: this.pointer.x, y: this.pointer.y, arm: Math.max(5, Math.round(6 * this.scale)) }
+            : null,
       },
     );
     this.publishFrameInfo();
@@ -620,7 +630,17 @@ export class OverlayController {
       if (this.hotHandle) c = CURSOR_FOR_HANDLE[this.hotHandle];
       else if (this.hoverShapeId !== null || this.inSel(p)) c = "move";
     }
+    /* 系统 crosshair 太粗太大（Windows IDC_CROSS ≈19px、2px 黑线），换成画布自绘的
+       细十字：1px 黑线 + 白晕，中心正落在指针热点上。录屏实测 Snipaste 的十字是
+       15px / 1px —— 本来就比系统那个小且细。自绘时同样要藏掉系统光标，
+       否则细十字底下还压着一个粗十字。 */
+    const cross = c === "crosshair" && this.pointerIn && p !== null;
+    if (cross) c = "none";
     if (this.canvas.style.cursor !== c) this.canvas.style.cursor = c;
+    if (cross !== this.drawCross) {
+      this.drawCross = cross;
+      this.mark();
+    }
   }
 
   /**
@@ -755,6 +775,7 @@ export class OverlayController {
   private onPointerMove = (e: PointerEvent) => {
     const p = this.evPos(e);
     this.pointer = p;
+    this.pointerIn = true;
     const a = this.anchor;
 
     if (!a) {
@@ -813,6 +834,8 @@ export class OverlayController {
   };
 
   private onPointerLeave = () => {
+    // 自绘十字随指针离开画布消失（工具条上不该留一个悬在半空的十字）
+    this.pointerIn = false;
     // 只在没按下时清：拖拽中指针飞出画布是常事，锚点还得留着继续算
     if (!this.anchor) this.clearHover();
   };
@@ -1133,10 +1156,30 @@ export class OverlayController {
   // ---------- 工具、属性与图形 ----------
 
   setTool(t: ToolId | null): void {
+    /* 句柄还活着的那支矩形/椭圆 + 又点了「矩形/椭圆」= **就地换形状**，不是离开这一支
+       （录屏 t=28：填充矩形带 8 句柄，点椭圆后原地变成椭圆、句柄不消失）。
+       所以这条分支不能走下面的 releaseEditHandles。 */
+    const sh = this.editableShape();
+    if (
+      sh &&
+      (sh.kind === "rect" || sh.kind === "ellipse") &&
+      !sh.marker &&
+      (t === "rect" || t === "ellipse") &&
+      t !== sh.kind
+    ) {
+      this.pushUndo();
+      sh.kind = t;
+      this.store.set({ tool: t, selectedId: null, pendingTextAt: null });
+      this.touchShapes();
+      this.clearHover();
+      this.updateCursor();
+      this.mark();
+      return;
+    }
     // 切工具时丢弃未提交的文字输入（输入框随 pendingTextAt 一起消失）
     this.store.set({ tool: t, selectedId: null, pendingTextAt: null });
     this.clearHover();
-    // 切工具 = 离开刚才那一支，端点句柄随之消失
+    // 切到别的工具 = 离开刚才那一支，句柄随之消失
     this.releaseEditHandles();
     this.pendingTextValue = "";
     // 光标要立刻跟上：用键盘 E/X 切到有刷圈的工具时，鼠标可能根本不动，
@@ -1194,9 +1237,19 @@ export class OverlayController {
    * 选中了已画的矩形/椭圆时连同该图形一起改 —— 否则只动全局默认值，
    * 用户点选一个图形再按 F 会毫无反应。
    */
+  /**
+   * 描边/填充这一组**落在哪个图形上**：点选的图形优先，其次"刚画完还带句柄"的那支
+   * （录屏 t=20–26：画完矩形带着 8 句柄，此时点描边/填充要改的就是这一支）。
+   * 两者都不是矩形/椭圆 → null = 只改全局默认值。
+   */
+  private fillTarget(): RectShape | null {
+    const cand =
+      this.state.shapes.find((x) => x.id === this.state.selectedId) ?? this.editableShape();
+    return cand && (cand.kind === "rect" || cand.kind === "ellipse") ? cand : null;
+  }
+
   setFill(filled: boolean): void {
-    const sel = this.state.shapes.find((x) => x.id === this.state.selectedId);
-    const target = sel && (sel.kind === "rect" || sel.kind === "ellipse") ? sel : null;
+    const target = this.fillTarget();
     if (target && target.filled !== filled) {
       target.filled = filled;
       this.touchShapes();
@@ -1209,17 +1262,22 @@ export class OverlayController {
     this.setFill(!this.fillState().filled);
   }
 
-  /** 填充开关的可见性与当前态：工具是矩形/椭圆，或选中的图形是它们。
-   *  和 toggleFill 读同一套判定，按钮不会显示得出来却点不动。 */
-  fillState(): { visible: boolean; filled: boolean } {
-    const sel = this.state.shapes.find((x) => x.id === this.state.selectedId);
-    const onShape = !!sel && (sel.kind === "rect" || sel.kind === "ellipse");
-    const onTool = this.state.tool === "rect" || this.state.tool === "ellipse";
-    const filled =
-      onShape && sel && (sel.kind === "rect" || sel.kind === "ellipse")
-        ? sel.filled
-        : this.state.props.filled;
-    return { visible: onTool || onShape, filled };
+  /** 填充开关的可见性与当前态：工具是矩形/椭圆，或点选/刚画完的那支是它们。
+   *  和 setFill 读同一个 fillTarget，按钮不会显示得出来却点不动。 */
+  fillState(): {
+    visible: boolean;
+    filled: boolean;
+    /** 这一组当前对着哪个形状：有目标图形就跟图形，否则跟工具 */
+    kind: "rect" | "ellipse" | null;
+  } {
+    const t = this.fillTarget();
+    const tool = this.state.tool;
+    const onTool = tool === "rect" || tool === "ellipse";
+    return {
+      visible: onTool || t !== null,
+      filled: t ? t.filled : this.state.props.filled,
+      kind: t ? t.kind : onTool ? tool : null,
+    };
   }
 
   /**
