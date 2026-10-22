@@ -1,8 +1,8 @@
 //! 画布合成。命令式，每帧一次；React 不参与这里的绘制。
 
 import { drawShapes, type RenderDeps } from "../../annotate/render";
-import { shapeBounds, type Shape } from "../../annotate/model";
-import { handlePoints, type Handle, type Phase, type Point, type Rect } from "./types";
+import { shapeBounds, type Shape, type ShapeHandle } from "../../annotate/model";
+import { handlePoints, type Handle, type Phase, type Rect } from "./types";
 
 export interface PaintInput {
   frame: ImageBitmap;
@@ -18,10 +18,10 @@ export interface PaintInput {
   hoverId: number | null;
   /** 光标正压着的手柄：那一格放大一点，作为"可以朝这个方向拉"的反馈；null 无 */
   hotHandle: Handle | null;
-  /** 「刚画完那一支」的端点句柄（箭头两端 / 笔迹首末点）；空数组 = 无可编辑图形 */
-  editPoints: Point[];
-  /** 光标压着第几个端点；-1 无 */
-  hotEdit: number;
+  /** 「刚画完那一支」的句柄（箭头两端 / 笔迹首末点 / 矩形·椭圆 8 向）；空数组 = 无可编辑图形 */
+  editHandles: ShapeHandle[];
+  /** 光标压着哪个句柄的 key；null 无 */
+  hotEdit: string | null;
   accent: string;
   maskAlpha: number;
   handleSize: number;
@@ -100,9 +100,9 @@ export function paint(
     }
   }
 
-  // 端点句柄不看 showHandles：刚画完那支的持有工具仍是开着的，
-  // 这时候正是唯一能拖端点的窗口
-  i.editPoints.forEach((p, k) => dot(p.x, p.y, i.hotEdit === k ? hs * 1.25 : hs));
+  // 图形句柄不看 showHandles：刚画完那支时工具仍是开着的，
+  // 而这正是唯一能拖句柄的窗口。矩形/椭圆的 8 向与选区手柄同一画法（同款圆点）
+  i.editHandles.forEach((h) => dot(h.x, h.y, i.hotEdit === h.k ? hs * 1.25 : hs));
 
   /* 自绘工具圈（此时系统光标被 controller 置成 none，见 brushRadius）：
      橡皮圆头 / 马赛克线条（环径=笔刷尺寸）+ 记号笔（固定 ~15px）。

@@ -9,12 +9,12 @@ import { PixelReader } from "./pixelReader";
 import { makeScratch } from "../../annotate/mosaic";
 import { drawShapes } from "../../annotate/render";
 import {
-  canEditPoints,
+  applyShapeHandle,
+  canEditShape,
   DEFAULT_PROPS,
   type DrawProps,
-  moveEditPoint,
   type Shape,
-  shapeEditPoints,
+  shapeHandles,
 } from "../../annotate/model";
 import { parse as parseAnnotation } from "../../annotate/serialize";
 import {
@@ -24,6 +24,7 @@ import {
   moveRect,
   norm,
   rectEq,
+  resizeRect,
   type Handle,
   type Phase,
   type Point,
@@ -64,8 +65,8 @@ type Anchor =
   | { mode: "move"; rect0: Rect; start: Point }
   | { mode: "shape-new"; start: Point; id: number }
   | { mode: "shape-move"; start: Point; id: number; origin: Shape }
-  /** 拖「刚画完那一支」的端点：index 对应 shapeEditPoints 的下标 */
-  | { mode: "shape-edit"; start: Point; id: number; index: number; origin: Shape }
+  /** 拖「刚画完那一支」的句柄：key 对应 shapeHandles 的 k（点类 a/b/first/last，矩形类 nw..w） */
+  | { mode: "shape-edit"; start: Point; id: number; key: string; origin: Shape }
   | null;
 
 export interface FrameInfo {
@@ -136,8 +137,8 @@ export class OverlayController {
    * 不进 store：它是纯交互态，撤销快照里不该有它，画布那一趟直接读字段。
    */
   private editId: number | null = null;
-  /** 光标当前压着 editId 那支的第几个端点；-1 = 没压着 */
-  private hotEdit = -1;
+  /** 光标当前压着 editId 那支的哪个句柄（"a"/"b"/"first"/"last"/"nw"…"w"）；null = 没压着 */
+  private hotEdit: string | null = null;
   /** store 订阅里挂 updateCursor —— 见 bind() 的注释 */
   private unsubCursor: (() => void) | null = null;
   private spaceHeld = false;
@@ -416,8 +417,8 @@ export class OverlayController {
         selectedId: s.selectedId,
         hoverId: this.hoverShapeId,
         hotHandle: this.hotHandle,
-        // 刚画完那支的端点句柄（空数组 = 没有可编辑的图形）
-        editPoints: editable ? shapeEditPoints(editable) : [],
+        // 刚画完那支的句柄（空数组 = 没有可编辑的图形）
+        editHandles: editable ? shapeHandles(editable) : [],
         hotEdit: this.hotEdit,
         accent: ACCENT,
         maskAlpha: MASK_ALPHA,
@@ -554,16 +555,15 @@ export class OverlayController {
     return !!s && p.x >= s.x && p.x <= s.x + s.w && p.y >= s.y && p.y <= s.y + s.h;
   }
 
-  /** 可编辑那支的端点命中，返回下标；没得编辑 / 没压着 = -1。容差与选区手柄同宽 */
-  private hitEditable(p: Point): number {
+  /** 可编辑那支的句柄命中，返回其 key；没得编辑 / 没压着 = null。容差与选区手柄同宽 */
+  private hitEditable(p: Point): string | null {
     const sh = this.editableShape();
-    if (!sh) return -1;
+    if (!sh) return null;
     const tol = this.handleSize;
-    const pts = shapeEditPoints(sh);
-    for (let i = 0; i < pts.length; i++) {
-      if (Math.abs(pts[i].x - p.x) <= tol && Math.abs(pts[i].y - p.y) <= tol) return i;
+    for (const h of shapeHandles(sh)) {
+      if (Math.abs(h.x - p.x) <= tol && Math.abs(h.y - p.y) <= tol) return h.k;
     }
-    return -1;
+    return null;
   }
 
   /** 当前可拖端点的图形（图形被撤销掉时自然变 null，句柄也就没了） */
@@ -574,9 +574,9 @@ export class OverlayController {
 
   /** 交还「可编辑」状态：起新笔、切工具、退回、undo/redo 都要调 */
   private releaseEditHandles(): void {
-    if (this.editId === null && this.hotEdit < 0) return;
+    if (this.editId === null && this.hotEdit === null) return;
     this.editId = null;
-    this.hotEdit = -1;
+    this.hotEdit = null;
     this.mark();
   }
 
@@ -594,9 +594,13 @@ export class OverlayController {
     const a = this.anchor;
     let c = "crosshair";
     if (a?.mode === "resize") c = CURSOR_FOR_HANDLE[a.handle];
-    else if (a?.mode === "move" || a?.mode === "shape-move" || a?.mode === "shape-edit") c = "move";
-    // 压在「刚画完那支」的端点上：此时工具还开着（默认是十字），但这一格该给抓手
-    else if (this.hotEdit >= 0) c = "move";
+    else if (a?.mode === "shape-edit")
+      // 拖图形的 8 向句柄时给方向缩放光标，拖端点时给抓手
+      c = a.key in CURSOR_FOR_HANDLE ? CURSOR_FOR_HANDLE[a.key as Handle] : "move";
+    else if (a?.mode === "move" || a?.mode === "shape-move") c = "move";
+    // 压在「刚画完那支」的句柄上：此时工具还开着（默认是十字），但这一格该给反馈
+    else if (this.hotEdit)
+      c = this.hotEdit in CURSOR_FOR_HANDLE ? CURSOR_FOR_HANDLE[this.hotEdit as Handle] : "move";
     // 该工具要自绘笔刷圈（橡皮圆头 / 马赛克线条 / 画笔）时隐藏系统光标，
     // 避免圈+十字双光标打架；矩形模式、形状类工具仍用十字
     else if (this.brushRadius() !== null) c = "none";
@@ -614,11 +618,11 @@ export class OverlayController {
    */
   private updateHover(p: Point): void {
     const s = this.state;
-    // 端点句柄不看工具是否开着：刚画完箭头时工具仍是选中的，句柄照样要能悬停
+    // 图形句柄不看工具是否开着：刚画完一支时工具仍是选中的，句柄照样要能悬停
     // （本方法只在没有按下锚点时被调用，不必再判 drawing/tool-drawing）
     const ei = this.hotEdit;
     const nextEdit = this.hitEditable(p);
-    const on = s.phase === "adjusting" && !s.tool && !s.pendingTextAt && nextEdit < 0;
+    const on = s.phase === "adjusting" && !s.tool && !s.pendingTextAt && nextEdit === null;
     const h = on ? this.hitHandle(p) : null;
     const sh = on && !h ? this.shapeAt(p) : null;
     const id = sh && this.inSel(p) ? sh.id : null;
@@ -632,10 +636,10 @@ export class OverlayController {
   /** 悬停态作废（按下、切工具、退回检测态、指针离开画布时都要清，
    *  否则高亮/放大的那颗点会赖在最后一帧上） */
   private clearHover(): void {
-    if (this.hotHandle === null && this.hoverShapeId === null && this.hotEdit < 0) return;
+    if (this.hotHandle === null && this.hoverShapeId === null && this.hotEdit === null) return;
     this.hotHandle = null;
     this.hoverShapeId = null;
-    this.hotEdit = -1;
+    this.hotEdit = null;
     this.mark();
   }
 
@@ -659,17 +663,17 @@ export class OverlayController {
     }
     this.canvas.setPointerCapture(e.pointerId);
 
-    // 0) 刚画完那一支的端点句柄优先于一切：不先判它，工具还开着时这一点会被当成
+    // 0) 刚画完那一支的句柄优先于一切：不先判它，工具还开着时这一点会被当成
     //    "起笔画下一支"，句柄就永远拖不动（Snipaste 绘制后当场可改的就是这个入口）
     const ei = this.hitEditable(p);
-    if (ei >= 0) {
+    if (ei) {
       const sh = this.editableShape()!;
       this.pushUndo();
       this.anchor = {
         mode: "shape-edit",
         start: p,
         id: sh.id,
-        index: ei,
+        key: ei,
         origin: JSON.parse(JSON.stringify(sh)) as Shape,
       };
       this.mark();
@@ -778,21 +782,10 @@ export class OverlayController {
       const r = norm(a.start.x, a.start.y, dx, dy);
       this.store.set({ sel: { ...r, w: Math.max(1, r.w), h: Math.max(1, r.h) } });
     } else if (a.mode === "resize") {
-      const dx = p.x - a.start.x;
-      const dy = p.y - a.start.y;
-      const r = a.rect0;
-      let { x, y, w, h } = { x: r.x, y: r.y, w: r.w, h: r.h };
-      if (a.handle.includes("w")) {
-        x = r.x + dx;
-        w = r.w - dx;
-      }
-      if (a.handle.includes("e")) w = r.w + dx;
-      if (a.handle.includes("n")) {
-        y = r.y + dy;
-        h = r.h - dy;
-      }
-      if (a.handle.includes("s")) h = r.h + dy;
-      this.store.set({ sel: norm(x, y, w, h) });
+      // 与图形句柄共用 resizeRect（同一份缩放算法），从按下时的原矩形重算
+      this.store.set({
+        sel: resizeRect(a.rect0, a.handle, p.x - a.start.x, p.y - a.start.y),
+      });
     } else if (a.mode === "move") {
       this.store.set({ sel: moveRect(a.rect0, p.x - a.start.x, p.y - a.start.y, bound) });
     } else if (a.mode === "shape-new") {
@@ -802,7 +795,7 @@ export class OverlayController {
       if (sh) applyFromOrigin(sh, a.origin, p.x - a.start.x, p.y - a.start.y);
     } else if (a.mode === "shape-edit") {
       const sh = this.state.shapes.find((x) => x.id === a.id);
-      if (sh) moveEditPoint(sh, a.index, p);
+      if (sh) applyShapeHandle(sh, a.key, p, a.origin, a.start);
     }
     this.updateCursor();
     this.mark();
@@ -1415,10 +1408,9 @@ export class OverlayController {
     else if (s.kind === "erase") keep = s.mode === "rect" ? !!s.r && s.r.w > 2 && s.r.h > 2 : (s.pts?.length ?? 0) >= 1;
     if (keep) {
       this.touchShapes();
-      // 只有箭头 / 画笔 / 记号笔留端点句柄（对齐 Snipaste：矩形/椭圆画完就是定形，
-      // 再改靠重新画，不当场给缩放柄）
-      this.editId = canEditPoints(s.kind) ? id : null;
-      this.hotEdit = -1;
+      // 留哪些句柄看 canEditShape：箭头两端、笔迹首末点、矩形/椭圆四角+四边中点 8 向
+      this.editId = canEditShape(s) ? id : null;
+      this.hotEdit = null;
       return;
     }
     // 太小的废图形丢弃，并把 beginShape 压的那次快照还原

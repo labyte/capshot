@@ -1,7 +1,7 @@
 //! 标注图形数据模型（annotationJson v2）。
 //! 坐标：绘制期为「本显示器物理 px」；导出时转成「选区相对 px」再序列化（见 serialize.ts）。
 
-import type { Point, Rect } from "../overlay/engine/types";
+import { handlePoints, resizeRect, type Handle, type Point, type Rect } from "../overlay/engine/types";
 
 export type ShapeKind =
   | "rect"
@@ -241,37 +241,71 @@ export function shapeBounds(s: Shape): Rect {
   }
 }
 
-/**
- * 「刚画完那一支」的可拖端点（对齐 Snipaste：只有绘制后当场给句柄，点别处即锁死）。
- * 箭头 = 两端点；画笔 / 记号笔 = 路径首末点（**只动首末，中间点不动** ——
- * 自由笔迹拉中间点等于把笔迹重采样，那不是"调整"而是"重画"）。
- * 其余形状返回空数组 = 不可二次编辑。
- */
-export function shapeEditPoints(s: Shape): Point[] {
+/** 图形句柄：k 是身份（"a"/"b"/"first"/"last"，或选区那套 "nw"…"w"），x/y 为物理 px */
+export interface ShapeHandle {
+  k: string;
+  x: number;
+  y: number;
+}
+
+/** 画完之后能不能当场调形状（Snipaste：只有刚画完那一支给句柄，点别处即锁死） */
+export function canEditShape(s: Shape): boolean {
   switch (s.kind) {
     case "arrow":
-      return [s.a, s.b];
     case "polyline":
     case "marker":
-      return s.pts.length < 2 ? [] : [s.pts[0], s.pts[s.pts.length - 1]];
+      return true;
+    // 矩形/椭圆 = 四角 + 四边中点共 8 向句柄；记号笔的矩形高亮框不算
+    case "rect":
+    case "ellipse":
+      return !s.marker;
+    default:
+      return false;
+  }
+}
+
+/**
+ * 句柄位置。箭头 = 两端；画笔 / 记号笔 = 路径**首末点**（中间点不动 ——
+ * 拉自由笔迹的中间点等于把笔迹重采样，那是重画不是调整）；
+ * 矩形/椭圆 = 8 向，直接复用选区的 `handlePoints`，两处手柄几何保证一致。
+ */
+export function shapeHandles(s: Shape): ShapeHandle[] {
+  switch (s.kind) {
+    case "arrow":
+      return [
+        { k: "a", x: s.a.x, y: s.a.y },
+        { k: "b", x: s.b.x, y: s.b.y },
+      ];
+    case "polyline":
+    case "marker":
+      if (s.pts.length < 2) return [];
+      return [
+        { k: "first", x: s.pts[0].x, y: s.pts[0].y },
+        { k: "last", x: s.pts[s.pts.length - 1].x, y: s.pts[s.pts.length - 1].y },
+      ];
+    case "rect":
+    case "ellipse":
+      return s.marker ? [] : handlePoints(s.r).map((h) => ({ k: h.k, x: h.x, y: h.y }));
     default:
       return [];
   }
 }
 
-/** 该形状是否支持端点二次编辑（settleShape 用它决定要不要留句柄） */
-export const canEditPoints = (kind: Shape["kind"]): boolean =>
-  kind === "arrow" || kind === "polyline" || kind === "marker";
-
-/** 把第 index 个端点挪到 p（与 shapeEditPoints 的下标约定一一对应） */
-export function moveEditPoint(s: Shape, index: number, p: Point): void {
+/**
+ * 拖某个句柄。点类（箭头端点、笔迹首末）直接把点落过去；矩形/椭圆走 `resizeRect` ——
+ * 与选区缩放**同一份实现**，且从按下时的原矩形重算（不累加增量），
+ * 免得一路拖下去越拖越漂。
+ */
+export function applyShapeHandle(s: Shape, k: string, p: Point, origin: Shape, start: Point): void {
   const np = { x: p.x, y: p.y };
   if (s.kind === "arrow") {
-    if (index === 0) s.a = np;
-    else s.b = np;
+    if (k === "a") s.a = np;
+    else if (k === "b") s.b = np;
   } else if (s.kind === "polyline" || s.kind === "marker") {
-    if (index === 0) s.pts[0] = np;
-    else s.pts[s.pts.length - 1] = np;
+    if (k === "first") s.pts[0] = np;
+    else if (k === "last") s.pts[s.pts.length - 1] = np;
+  } else if ((s.kind === "rect" || s.kind === "ellipse") && origin.kind === s.kind) {
+    s.r = resizeRect(origin.r, k as Handle, p.x - start.x, p.y - start.y);
   }
 }
 

@@ -37,6 +37,26 @@ export const norm = (x0: number, y0: number, dx: number, dy: number): Rect => ({
 
 export const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 
+/**
+ * 按手柄方向缩放矩形：w/e 动 x 与 w，n/s 动 y 与 h，最后归一化掉负宽高。
+ * **选区的 8 向手柄与图形（矩形/椭圆）的 8 向句柄共用这一份** ——
+ * 两处算法必须一致，否则同一个手柄在两个地方拉出来的手感不一样。
+ */
+export function resizeRect(r: Rect, handle: Handle, dx: number, dy: number): Rect {
+  let { x, y, w, h } = { x: r.x, y: r.y, w: r.w, h: r.h };
+  if (handle.includes("w")) {
+    x = r.x + dx;
+    w = r.w - dx;
+  }
+  if (handle.includes("e")) w = r.w + dx;
+  if (handle.includes("n")) {
+    y = r.y + dy;
+    h = r.h - dy;
+  }
+  if (handle.includes("s")) h = r.h + dy;
+  return norm(x, y, w, h);
+}
+
 export const rectEq = (a: Rect | null, b: Rect | null) =>
   !!a && !!b && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
 
