@@ -362,24 +362,31 @@ export class OverlayController {
   };
 
   /**
-   * 笔刷圈的半径（物理 px）：橡皮的圆头模式、马赛克的线条模式。
-   * 返回 null 表示不画圈（此时恢复常规光标）。圈可见时系统光标会被隐藏，
-   * 由画笔中心十字代替瞄准点 —— 见 painter 与 updateCursor。
+   * 该工具要不要**自绘光标**，以及画哪一种。返回 null = 用系统光标（十字/I 梁/…）。
+   * 自绘时系统光标必须隐藏（见 updateCursor 的 `none` 分支），否则会两个光标叠着。
+   *
+   * - `ring` 笔刷圈：橡皮圆头、马赛克线条（§7/§9）、**画笔（§5：圈直径=实际笔刷大小）**
+   *   —— 圈内带中心十字当瞄准点，滚轮即时改圈的大小
+   * - `dotTicks` 圆点 + 四向短线：**箭头（§4：圆点大小随滚轮实时变化）**
    */
-  private ringRadius(): number | null {
+  private cursorSpec(): { kind: "ring" | "dotTicks"; r: number } | null {
     const s = this.state;
     if (s.phase !== "adjusting" && s.phase !== "tool-drawing") return null;
-    if (s.tool === "eraser" && !s.props.eraserRect) return s.props.eraserRadius * this.scale;
-    if (s.tool === "mosaic" && s.props.mosaicMode === "line") {
-      return (s.props.mosaicBrush * this.scale) / 2;
+    const sc = this.scale;
+    const p = s.props;
+    if (s.tool === "eraser" && !p.eraserRect) return { kind: "ring", r: p.eraserRadius * sc };
+    if (s.tool === "mosaic" && p.mosaicMode === "line") {
+      return { kind: "ring", r: (p.mosaicBrush * sc) / 2 };
     }
+    if (s.tool === "polyline") return { kind: "ring", r: (p.width * sc) / 2 };
+    if (s.tool === "arrow") return { kind: "dotTicks", r: (p.width * sc) / 2 };
     return null;
   }
 
   private draw(): void {
     if (!this.frame) return;
     const s = this.state;
-    const ring = this.ringRadius();
+    const cur = this.cursorSpec();
     const editable = this.editableShape();
     if (!this.reader) {
       // 懒建：放大镜真要读像素才铺一张全幅 CPU 后端画布
@@ -406,7 +413,8 @@ export class OverlayController {
         accent: ACCENT,
         maskAlpha: MASK_ALPHA,
         handleSize: this.handleSize,
-        brushRing: ring !== null && this.pointer ? { x: this.pointer.x, y: this.pointer.y, r: ring } : null,
+        brushCursor:
+          cur && this.pointer ? { ...cur, x: this.pointer.x, y: this.pointer.y } : null,
       },
     );
     this.publishFrameInfo();
@@ -578,9 +586,9 @@ export class OverlayController {
     else if (a?.mode === "move" || a?.mode === "shape-move" || a?.mode === "shape-edit") c = "move";
     // 压在「刚画完那支」的端点上：此时工具还开着（默认是十字），但这一格该给抓手
     else if (this.hotEdit >= 0) c = "move";
-    // 有刷圈的模式（橡皮圆头 / 马赛克线条）用画布自绘的圈当光标，
-    // 隐藏系统光标避免圈+十字双光标打架；矩形模式仍用十字
-    else if (this.ringRadius() !== null) c = "none";
+    // 该工具要自绘光标（笔刷圈 / 圆点短线）时隐藏系统光标，避免两个光标打架；
+    // 矩形模式、形状类工具仍用十字
+    else if (this.cursorSpec()) c = "none";
     else if (s.pendingTextAt) c = "text";
     else if (s.phase === "adjusting" && !s.tool && p) {
       if (this.hotHandle) c = CURSOR_FOR_HANDLE[this.hotHandle];
