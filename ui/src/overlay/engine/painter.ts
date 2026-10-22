@@ -104,9 +104,11 @@ export function paint(
   // 这时候正是唯一能拖端点的窗口
   i.editPoints.forEach((p, k) => dot(p.x, p.y, i.hotEdit === k ? hs * 1.25 : hs));
 
-  /* 自绘笔刷圈（此时系统光标被 controller 置成 none，见 cursorSpec）：
-     橡皮圆头 / 马赛克线条 / 画笔共用。白底 + 深浅双描边任何背景都看得见；
-     中心十字是瞄准点 —— 圈小的时候看不出笔刷究竟落在哪个像素上。 */
+  /* 自绘工具圈（此时系统光标被 controller 置成 none，见 brushRadius）：
+     橡皮圆头 / 马赛克线条（环径=笔刷尺寸）+ 记号笔（固定 ~15px）。
+     录屏实测 Snipaste 的环：半透明白填充（环内比环外亮）+ 深色描边，**圈内没有十字** ——
+     原先那个"中心十字瞄准点"是我们自己加的，已去掉。
+     白色下描边保留：实测底是粉色看不出深色环在深底上够不够，多一道白边稳一点。 */
   if (i.brushCursor) {
     const { x, y, r } = i.brushCursor;
     ctx.beginPath();
@@ -119,21 +121,5 @@ export function paint(
     ctx.lineWidth = 1;
     ctx.strokeStyle = "rgba(0,0,0,0.5)";
     ctx.stroke();
-
-    const arm = Math.max(3, r * 0.35);
-    // 两段式描边：先粗深色当晕影，再细浅色画本体，深浅底上都对比得开
-    for (const [col, w] of [
-      ["rgba(0,0,0,0.55)", 3],
-      ["#fff", 1],
-    ] as const) {
-      ctx.strokeStyle = col;
-      ctx.lineWidth = w;
-      ctx.beginPath();
-      ctx.moveTo(x - arm, y);
-      ctx.lineTo(x + arm, y);
-      ctx.moveTo(x, y - arm);
-      ctx.lineTo(x, y + arm);
-      ctx.stroke();
-    }
   }
 }

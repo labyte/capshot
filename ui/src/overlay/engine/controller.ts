@@ -365,15 +365,20 @@ export class OverlayController {
    * 该工具要不要**自绘笔刷圈**，要则返回半径（物理 px），不要则返回 null（用系统光标）。
    * 圈可见时系统光标必须隐藏（见 updateCursor 的 `none` 分支），否则会两个光标叠着。
    *
-   * 覆盖：橡皮圆头、马赛克线条、**画笔** —— 圈内带中心十字当瞄准点，
-   * 滚轮即时改圈的大小。画笔这条有外部背书：Snipaste 官方包里挖出的 changelog 明文
-   * 「cursor shape not updated when adjusting the **pen size** with mouse wheeling [#1310]」，
-   * 即笔刷类工具的光标随笔刷大小实时变化，是真行为。
+   * 依据 = 逐帧分析一段 Snipaste 真实录屏（1920×1080@60fps，相邻帧差分定位光标 +
+   * 模板匹配认字形），不是猜的：
    *
-   * **箭头不在此列（已撤回）**：我们文档 §4 那句「圆点 + 四个方向短线」查无实据 ——
-   * 官方 zip 里没有任何光标图资源（无 .cur/.ani、无 :/…cur… 资源路径），
-   * changelog 只提 pen size 不提箭头，那句是当初凭记忆写进文档的。
-   * 箭头工具回到系统十字，等真值再定。记号笔同理不动（#1310 说的是 pen，未覆盖 marker）。
+   * - **橡皮圆头 / 马赛克线条**：环径 = 实际笔刷尺寸，滚轮即时变
+   *   （官方 changelog #1310「cursor shape not updated when adjusting the pen size
+   *   with mouse wheeling」背书这一条）
+   * - **记号笔**：**固定 ~15px 直径**的细圆环，**不随线宽变** ——
+   *   录屏 t=185→196 环径恒为 14–15px，而同帧粉色高亮笔迹宽 32–37px，
+   *   两者无关，所以它只是个"这是记号笔"的工具圈，不是笔刷预览
+   * - **画笔（polyline）不在此列**：录屏 t=141 那段红色自由笔迹上量到的是**纯十字**，
+   *   上一轮我给它加环是错的，已撤
+   * - **箭头也不在此列**：t=83 量到的是十字；文档 §4「圆点 + 四个方向短线」
+   *   查无实据（官方包里无任何光标图资源），已撤回
+   * - 矩形模式（markerRect / eraserRect）与形状类工具一律系统十字
    */
   private brushRadius(): number | null {
     const s = this.state;
@@ -382,7 +387,8 @@ export class OverlayController {
     const p = s.props;
     if (s.tool === "eraser" && !p.eraserRect) return p.eraserRadius * sc;
     if (s.tool === "mosaic" && p.mosaicMode === "line") return (p.mosaicBrush * sc) / 2;
-    if (s.tool === "polyline") return (p.width * sc) / 2;
+    // 记号笔：固定工具圈（录屏实测直径 ~15px @100%，与线宽无关）
+    if (s.tool === "marker" && !p.markerRect) return 7.5 * sc;
     return null;
   }
 
