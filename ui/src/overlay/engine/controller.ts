@@ -144,8 +144,6 @@ export class OverlayController {
   private hotEdit: string | null = null;
   /** 指针在画布内吗：自绘十字只在画布内画，移到工具条上就该消失 */
   private pointerIn = false;
-  /** 这一帧要不要自绘细十字（updateCursor 顺带算，画布与光标因此不会各说各话） */
-  private drawCross = false;
   /** store 订阅里挂 updateCursor —— 见 bind() 的注释 */
   private unsubCursor: (() => void) | null = null;
   private spaceHeld = false;
@@ -370,23 +368,23 @@ export class OverlayController {
   };
 
   /**
-   * 该工具要不要**自绘笔刷圈**，要则返回半径（物理 px），不要则返回 null（用系统光标）。
-   * 圈可见时系统光标必须隐藏（见 updateCursor 的 `none` 分支），否则会两个光标叠着。
+   * 该工具要不要**自绘光标**，要则返回 {kind, 半径（物理 px）}，不要则返回 null
+   * （由 cursorPlan() 落回细十字或系统光标）。返回非空时系统光标必须隐藏，否则两个光标叠着。
    *
-   * 依据 = 逐帧分析一段 Snipaste 真实录屏（1920×1080@60fps，相邻帧差分定位光标 +
-   * 模板匹配认字形），不是猜的：
+   * 依据 = 逐帧分析 Snipaste 真实录屏（1920×1080@60fps：相邻帧差分定位光标 +
+   * 模板匹配认字形），凡与录屏不一致处都注明是"用户指定"：
    *
-   * - **橡皮圆头 / 马赛克线条**：环径 = 实际笔刷尺寸，滚轮即时变
+   * - `ring` **橡皮圆头**：环径 = 实际笔刷尺寸，滚轮即时变
    *   （官方 changelog #1310「cursor shape not updated when adjusting the pen size
-   *   with mouse wheeling」背书这一条）
-   * - **记号笔**：**固定 ~15px 直径**的细圆环，**不随线宽变** ——
-   *   录屏 t=185→196 环径恒为 14–15px，而同帧粉色高亮笔迹宽 32–37px，
-   *   两者无关，所以它只是个"这是记号笔"的工具圈，不是笔刷预览
-   * - **画笔（polyline）不在此列**：录屏 t=141 那段红色自由笔迹上量到的是**纯十字**，
-   *   上一轮我给它加环是错的，已撤
-   * - **箭头也不在此列**：t=83 量到的是十字；文档 §4「圆点 + 四个方向短线」
-   *   查无实据（官方包里无任何光标图资源），已撤回
-   * - 矩形模式（markerRect / eraserRect）与形状类工具一律系统十字
+   *   with mouse wheeling」背书）
+   * - `dashDot` **马赛克线条**：实心 + 虚线边（用户指定），环径仍随笔刷 8–80 变
+   * - `dot` **记号笔**：实心圆，**大小跟线宽**（用户指定）—— 它涂出来的高亮宽 = 线宽×4，
+   *   所以半径取 width×2×scale，圈多大涂多宽。录屏 t=185–196 量到的曾是固定 ~15px 细环，
+   *   以用户要求为准
+   * - `dotTicks` **箭头 / 画笔**：圆点 + 四向短线，纯当前标注色、点径随线宽实时变
+   *   （录屏 t=86 大点 ↔ t=130 小点；画笔按用户要求与箭头同步，t=141 实测本是十字）
+   * - 返回 null 的：矩形/椭圆/序号/文字（→ cursorPlan 给细十字或 I 梁）、
+   *   以及一切**矩形模式**（markerRect / eraserRect）
    */
   private toolCursor(): { kind: "ring" | "dotTicks" | "dot" | "dashDot"; r: number } | null {
     const s = this.state;
@@ -398,8 +396,10 @@ export class OverlayController {
     if (s.tool === "mosaic" && p.mosaicMode === "line") {
       return { kind: "dashDot", r: (p.mosaicBrush * sc) / 2 };
     }
-    // 记号笔：**实心**工具圆（直径 ~15px @100%，与线宽无关，用户指定实心）
-    if (s.tool === "marker" && !p.markerRect) return { kind: "dot", r: 7.5 * sc };
+    /* 记号笔：**实心**工具圆，大小**跟线宽**（用户指定）。
+       它实际画出来的高亮宽 = 线宽×4（见 render 的 marker 分支），所以光标半径取
+       width×2×scale —— 圈多大，涂出来就多宽，滚轮一改当场跟着变。 */
+    if (s.tool === "marker" && !p.markerRect) return { kind: "dot", r: p.width * 2 * sc };
     /* 箭头：圆点 + 四向短线，点径随线宽实时变、颜色用当前标注色（录屏 t=86/130/134：
        红色大点 → 红色小点，正是滚轮改线宽的前后两态）。
        上一轮我拿 t=83（矩形工具拖角）和 t=127（箭头已定稿）当成了箭头光标，样本取错，
@@ -414,12 +414,10 @@ export class OverlayController {
   private draw(): void {
     if (!this.frame) return;
     const s = this.state;
-    const cur = this.toolCursor();
+    // 光标层与系统光标同源：cursorPlan() 一次决定，绝不会出现两种光标同屏
+    const plan = this.cursorPlan();
+    const drawn = plan.drawn;
     const editable = this.editableShape();
-    /* 压在手柄/句柄上时只给系统选择光标，绘制光标（圈、圆点短线、细十字）整层让位 ——
-       两种光标同屏会互相看不懂 */
-    const grabHandle =
-      this.hotEdit !== null || (this.hotHandle !== null && s.tool === null);
     if (!this.reader) {
       // 懒建：放大镜真要读像素才铺一张全幅 CPU 后端画布
       this.reader = new PixelReader(this.frame, this.frame.width, this.frame.height);
@@ -446,13 +444,13 @@ export class OverlayController {
       handleSize: this.handleSize,
       // 自绘工具光标：笔刷圈（橡皮/马赛克线条/记号笔）或箭头的圆点+四向短线
       toolCursor:
-        cur && this.pointer && !grabHandle
-          ? { x: this.pointer.x, y: this.pointer.y, r: cur.r, kind: cur.kind, color: s.props.color }
+        drawn && drawn.kind !== "cross" && this.pointer
+          ? { x: this.pointer.x, y: this.pointer.y, r: drawn.r, kind: drawn.kind, color: s.props.color }
           : null,
       // 自绘细十字（取代系统那枚又粗又大的 IDC_CROSS）
       cross:
-        this.drawCross && this.pointer && !grabHandle
-          ? { x: this.pointer.x, y: this.pointer.y, arm: Math.max(5, Math.round(6 * this.scale)) }
+        drawn?.kind === "cross" && this.pointer
+          ? { x: this.pointer.x, y: this.pointer.y, arm: drawn.r }
           : null,
     };
     paint(this.ctx, { w: this.layout.physW, h: this.layout.physH }, input);
@@ -621,47 +619,49 @@ export class OverlayController {
     this.mark();
   }
 
+  /** 自绘细十字的臂长（物理 px）。录屏实测 Snipaste 的十字 15px / 1px，
+   *  比系统 IDC_CROSS（≈19px、2px 黑线）小且细 */
+  private crossArm(): number {
+    return Math.max(5, Math.round(6 * this.scale));
+  }
+
   /**
-   * 光标 = 状态的纯函数。判定顺序：拖拽中的锁定值 > 刷圈 > 文字插入点 > 悬停态。
+   * 光标的**唯一决策点**：一次返回「系统光标 css」+「要自绘什么」，二者严格互斥。
+   * `updateCursor()` 与 `draw()` 都只读它 —— 之前两边各判一遍，条件稍不同步就出现
+   * 「缩放光标与绘制光标同屏」那类 bug（用户报的"多处有此类问题"）。
    *
-   * **拖拽中必须用锁定值**：resize 时每帧 sel 都在变，再拿实时位置去 hitHandle，
-   * 选区一撑大手柄就跑出容差，光标会在 resize / move / crosshair 之间抖。
-   * 悬停态（hotHandle / hoverShapeId）由 updateHover 统一算，这里只读结果 ——
-   * 画布上的高亮和光标因此永远说同一句话。
+   * 顺序：指针不在画布上 → 拖拽锁定值 → 压在句柄/选区手柄 → 文字 I 梁 → 无工具时 move
+   * → 其余一律自绘。**拖拽中必须用锁定值**：resize 时每帧 sel 都在变，拿实时位置去
+   * hitHandle 会让光标在 resize/move/crosshair 之间抖。
    */
-  private updateCursor(): void {
+  private cursorPlan(): {
+    css: string;
+    drawn: { kind: "ring" | "dotTicks" | "dot" | "dashDot" | "cross"; r: number } | null;
+  } {
     const s = this.state;
     const p = this.pointer;
     const a = this.anchor;
-    let c = "crosshair";
-    if (a?.mode === "resize") c = CURSOR_FOR_HANDLE[a.handle];
-    else if (a?.mode === "shape-edit") c = this.editCursor(a.key);
-    else if (a?.mode === "move" || a?.mode === "shape-move") c = "move";
-    // 压在「刚画完那支」的句柄上：此时工具还开着（默认是绘制光标），
-    // 但这一格该只给选择光标 —— 两种光标不能同屏
-    else if (this.hotEdit) c = this.editCursor(this.hotEdit);
-    /* 选区手柄只在**没有工具激活**时才抢光标。有工具时它常年在选区边框上（一半还压在
-       暗区里），一靠近就换成系统缩放光标 —— 用户明确要的是"非工具条区域一律显示当前
-       标注光标"。手柄照样能抓：pointerdown 里的判定顺序不变。 */
-    else if (this.hotHandle && !s.tool) c = CURSOR_FOR_HANDLE[this.hotHandle];
-    // 该工具要自绘光标（笔刷圈 / 圆点短线）时隐藏系统光标，避免两个光标打架
-    else if (this.toolCursor()) c = "none";
-    // 文字工具：定位时就是 I 梁（"这里能打字"），不该还是个十字
-    else if (s.tool === "text" || s.pendingTextAt) c = "text";
-    else if (s.phase === "adjusting" && p) {
-      if (!s.tool && (this.hoverShapeId !== null || this.inSel(p))) c = "move";
-    }
-    /* 系统 crosshair 太粗太大（Windows IDC_CROSS ≈19px、2px 黑线），换成画布自绘的
-       细十字：1px 黑线 + 白晕，中心正落在指针热点上。录屏实测 Snipaste 的十字是
-       15px / 1px —— 本来就比系统那个小且细。自绘时同样要藏掉系统光标，
-       否则细十字底下还压着一个粗十字。 */
-    const cross = c === "crosshair" && this.pointerIn && p !== null;
-    if (cross) c = "none";
-    if (this.canvas.style.cursor !== c) this.canvas.style.cursor = c;
-    if (cross !== this.drawCross) {
-      this.drawCross = cross;
-      this.mark();
-    }
+    // 指针移到两条 bar 上（或还没进过画布）：自绘层整层撤，chrome 自己的 CSS 接管
+    if (!this.pointerIn || !p) return { css: "crosshair", drawn: null };
+    if (a?.mode === "resize") return { css: CURSOR_FOR_HANDLE[a.handle], drawn: null };
+    if (a?.mode === "shape-edit") return { css: this.editCursor(a.key), drawn: null };
+    if (a?.mode === "move" || a?.mode === "shape-move") return { css: "move", drawn: null };
+    // 压在「刚画完那支」的句柄上：只给选择光标，绘制光标让位
+    if (this.hotEdit) return { css: this.editCursor(this.hotEdit), drawn: null };
+    // 选区手柄只在没有工具激活时抢光标（有工具时它常压在暗区，见用户定的归属规则）
+    if (this.hotHandle && !s.tool)
+      return { css: CURSOR_FOR_HANDLE[this.hotHandle], drawn: null };
+    if (s.tool === "text" || s.pendingTextAt) return { css: "text", drawn: null };
+    if (!s.tool && s.phase === "adjusting" && (this.hoverShapeId !== null || this.inSel(p)))
+      return { css: "move", drawn: null };
+    const tc = this.toolCursor();
+    return { css: "none", drawn: tc ? { kind: tc.kind, r: tc.r } : { kind: "cross", r: this.crossArm() } };
+  }
+
+  /** 把决策里的系统光标写到 canvas 上（值没变不写，省一次样式重算） */
+  private updateCursor(): void {
+    const css = this.cursorPlan().css;
+    if (this.canvas.style.cursor !== css) this.canvas.style.cursor = css;
   }
 
   /**
@@ -871,8 +871,8 @@ export class OverlayController {
     // 只在没按下时清：拖拽中指针飞出画布是常事，锚点还得留着继续算
     if (!this.anchor) this.clearHover();
     /* 必须在这里重算一次光标：指针移到工具条/属性栏上之后，画布再也收不到
-       pointermove，不主动调 updateCursor 的话 drawCross 一直停在 true ——
-       自绘十字冻在画布上，与 chrome 自己的手型/箭头光标同时出现。 */
+       pointermove，不主动调 updateCursor 的话自绘十字会停在最后一帧上，
+       与 chrome 自己的箭头/手型光标同时出现。 */
     this.updateCursor();
   };
 

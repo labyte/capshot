@@ -60,18 +60,19 @@ export function paint(
   if (!i.sel) return;
   const { x, y, w, h } = i.sel;
 
+  /* 标注**不被选区裁剪**：在选区外（暗区）落的笔也画得出来，
+     与"随时可调选区"配套 —— 把选区放大就能露出先前画在外面的部分。
+     导出仍只取选区那块（renderFinalPng 的画布尺寸就是 sel.w×sel.h，天然裁掉）。
+     顺序要紧：**先画标注，再压暗罩** —— 这样选区外的笔和底图一起被压暗（"在暗区里"的观感），
+     选区内的笔保持原色。反过来（暗罩在先）会让暗区的笔浮在暗罩上，亮得突兀。 */
+  drawShapes(ctx, i.shapes, null, i.deps);
+
   // 选区外压暗：上/下/左/右四条边带，避免四角矩形重叠导致 alpha 叠深
   ctx.fillStyle = `rgba(0,0,0,${i.maskAlpha})`;
   ctx.fillRect(0, 0, out.w, y);
   ctx.fillRect(0, y + h, out.w, out.h - y - h);
   ctx.fillRect(0, y, x, h);
   ctx.fillRect(x + w, y, out.w - x - w, h);
-
-  /* 标注**不再被选区裁掉**：在选区外（暗区）落的笔也看得见，
-     与"随时可调选区"配套 —— 把选区放大就能露出先前画在外面的部分。
-     导出仍只取选区那块（renderFinalPng 的画布尺寸就是 sel.w×sel.h，天然裁掉），
-     所以"画在外面"的内容不会凭空进入成图。 */
-  drawShapes(ctx, i.shapes, null, i.deps);
 
   ctx.strokeStyle = i.accent;
   ctx.lineWidth = Math.max(1, i.handleSize / 6);
@@ -137,11 +138,11 @@ export function paint(
 
 /** 光标层（笔刷圈 / 箭头圆点短线 / 细十字）：永远画在场景之上 */
 export function paintCursor(ctx: CanvasRenderingContext2D, i: PaintInput): void {
-  /* 自绘工具圈（此时系统光标被 controller 置成 none，见 toolCursor）：
-     橡皮圆头 / 马赛克线条（环径=笔刷尺寸）+ 记号笔（固定 ~15px）。
-     录屏实测 Snipaste 的环：半透明白填充（环内比环外亮）+ 深色描边，**圈内没有十字** ——
-     原先那个"中心十字瞄准点"是我们自己加的，已去掉。
-     白色下描边保留：实测底是粉色看不出深色环在深底上够不够，多一道白边稳一点。 */
+  /* 自绘工具光标（此时系统光标被 cursorPlan 置成 none）：
+     ring = 橡皮圆头、dashDot = 马赛克线条、dot = 记号笔实心圆、dotTicks = 箭头/画笔圆点短线。
+     环径一律 = 实际笔刷/线宽，滚轮改档当场跟着变。
+     录屏实测 Snipaste 的环是半透明白填充（环内比环外亮）+ 深色描边，**圈内没有十字** ——
+     原先那个"中心十字瞄准点"是我们自己加的，已去掉。 */
   if (i.toolCursor) {
     const { x, y, r, kind, color } = i.toolCursor;
     if (kind === "ring") {
