@@ -120,7 +120,14 @@ export function paint(
     }
   }
 
-  /* 自绘工具圈（此时系统光标被 controller 置成 none，见 brushRadius）：
+  // 场景层到此为止。光标层另起一个函数，由调用方在 paint() 之后画 ——
+  // paint() 在 picking（取色）与"还没有选区"两种情况下要提前 return，
+  // 光标若画在它后面就会被整层跳过：此时系统光标已被置成 none，指针就彻底消失了。
+}
+
+/** 光标层（笔刷圈 / 箭头圆点短线 / 细十字）：永远画在场景之上 */
+export function paintCursor(ctx: CanvasRenderingContext2D, i: PaintInput): void {
+  /* 自绘工具圈（此时系统光标被 controller 置成 none，见 toolCursor）：
      橡皮圆头 / 马赛克线条（环径=笔刷尺寸）+ 记号笔（固定 ~15px）。
      录屏实测 Snipaste 的环：半透明白填充（环内比环外亮）+ 深色描边，**圈内没有十字** ——
      原先那个"中心十字瞄准点"是我们自己加的，已去掉。
@@ -139,39 +146,29 @@ export function paint(
       ctx.strokeStyle = "rgba(0,0,0,0.5)";
       ctx.stroke();
     } else {
-      /* 箭头：圆点 + 四向短线，**用当前标注色**（录屏 t=86/130/134 都是红点红短线），
-         点径随线宽实时变。先铺一层白底再上色，深底浅底都看得清。 */
+      /* 箭头 / 画笔：圆点 + 四向短线，**纯当前标注色，不加白描边**（用户要求：
+         白晕在浅底上反而糊成一团）。点径随线宽实时变（录屏 t=86 大点 ↔ t=130 小点）。 */
       const rr = Math.max(2.5, r);
-      ctx.beginPath();
-      ctx.arc(x, y, rr + 1.5, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(255,255,255,0.85)";
-      ctx.fill();
+      ctx.fillStyle = color;
       ctx.beginPath();
       ctx.arc(x, y, rr, 0, Math.PI * 2);
-      ctx.fillStyle = color;
       ctx.fill();
       const gap = rr + Math.max(3, rr * 0.5);
       const tick = Math.max(3, rr * 0.7);
-      const thick = Math.max(1.5, rr * 0.3);
-      for (const [col, w] of [
-        ["rgba(255,255,255,0.85)", thick + 2.5],
-        [color, thick],
+      ctx.strokeStyle = color;
+      ctx.lineWidth = Math.max(1.5, rr * 0.3);
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      for (const [dx, dy] of [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
       ] as const) {
-        ctx.strokeStyle = col;
-        ctx.lineWidth = w;
-        ctx.lineCap = "round";
-        ctx.beginPath();
-        for (const [dx, dy] of [
-          [1, 0],
-          [-1, 0],
-          [0, 1],
-          [0, -1],
-        ] as const) {
-          ctx.moveTo(x + dx * gap, y + dy * gap);
-          ctx.lineTo(x + dx * (gap + tick), y + dy * (gap + tick));
-        }
-        ctx.stroke();
+        ctx.moveTo(x + dx * gap, y + dy * gap);
+        ctx.lineTo(x + dx * (gap + tick), y + dy * (gap + tick));
       }
+      ctx.stroke();
     }
   }
 

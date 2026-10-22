@@ -4,7 +4,7 @@
 import { invoke, u8ToB64 } from "../../shared/ipc";
 import { getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
 import { createStore } from "./store";
-import { paint } from "./painter";
+import { paint, paintCursor, type PaintInput } from "./painter";
 import { PixelReader } from "./pixelReader";
 import { makeScratch } from "../../annotate/mosaic";
 import { drawShapes } from "../../annotate/render";
@@ -403,7 +403,10 @@ export class OverlayController {
        红色大点 → 红色小点，正是滚轮改线宽的前后两态）。
        上一轮我拿 t=83（矩形工具拖角）和 t=127（箭头已定稿）当成了箭头光标，样本取错，
        把这条误撤了 —— 文档 §4 原话是对的。 */
-    if (s.tool === "arrow") return { kind: "dotTicks", r: Math.max(3, (p.width * sc) / 2) };
+    // 画笔与箭头同一套光标（用户要求同步；#1310 说的 pen size 驱动光标也吻合）
+    if (s.tool === "arrow" || s.tool === "polyline") {
+      return { kind: "dotTicks", r: Math.max(3, (p.width * sc) / 2) };
+    }
     return null;
   }
 
@@ -412,47 +415,47 @@ export class OverlayController {
     const s = this.state;
     const cur = this.toolCursor();
     const editable = this.editableShape();
+    /* 压在手柄/句柄上时只给系统选择光标，绘制光标（圈、圆点短线、细十字）整层让位 ——
+       两种光标同屏会互相看不懂 */
+    const grabHandle = this.hotEdit !== null || this.hotHandle !== null;
     if (!this.reader) {
       // 懒建：放大镜真要读像素才铺一张全幅 CPU 后端画布
       this.reader = new PixelReader(this.frame, this.frame.width, this.frame.height);
     }
-    paint(
-      this.ctx,
-      { w: this.layout.physW, h: this.layout.physH },
-      {
-        frame: this.frame,
-        phase: s.phase,
-        hover: s.hover,
-        sel: s.sel,
-        shapes: s.shapes,
-        deps: { source: this.frame, scale: this.scale, scratch: this.scratch },
-        /* 选区的 8 向手柄**常驻**：切到绘图工具、甚至正在拖一笔，都照样显示照样抓
-           （用户要求：随时可调截图选区）。重编辑里选区就是整幅图，画一圈手柄只是噪声。 */
-        showHandles:
-          (s.phase === "adjusting" || s.phase === "tool-drawing") &&
-          s.toolbarVisible &&
-          !this.isEditor,
-        selectedId: s.selectedId,
-        hoverId: this.hoverShapeId,
-        hotHandle: this.hotHandle,
-        // 刚画完那支的句柄（空数组 = 没有可编辑的图形）
-        editHandles: editable ? shapeHandles(editable) : [],
-        hotEdit: this.hotEdit,
-        accent: ACCENT,
-        maskAlpha: MASK_ALPHA,
-        handleSize: this.handleSize,
-        // 自绘工具光标：笔刷圈（橡皮/马赛克线条/记号笔）或箭头的圆点+四向短线
-        toolCursor:
-          cur && this.pointer
-            ? { x: this.pointer.x, y: this.pointer.y, r: cur.r, kind: cur.kind, color: s.props.color }
-            : null,
-        // 自绘细十字（取代系统那枚又粗又大的 IDC_CROSS）
-        cross:
-          this.drawCross && this.pointer
-            ? { x: this.pointer.x, y: this.pointer.y, arm: Math.max(5, Math.round(6 * this.scale)) }
-            : null,
-      },
-    );
+    const input: PaintInput = {
+      frame: this.frame,
+      phase: s.phase,
+      hover: s.hover,
+      sel: s.sel,
+      shapes: s.shapes,
+      deps: { source: this.frame, scale: this.scale, scratch: this.scratch },
+      /* 选区的 8 向手柄**常驻**：切到绘图工具、甚至正在拖一笔，都照样显示照样抓
+         （用户要求：随时可调截图选区）。重编辑里选区就是整幅图，画一圈手柄只是噪声。 */
+      showHandles:
+        (s.phase === "adjusting" || s.phase === "tool-drawing") && s.toolbarVisible && !this.isEditor,
+      selectedId: s.selectedId,
+      hoverId: this.hoverShapeId,
+      hotHandle: this.hotHandle,
+      // 刚画完那支的句柄（空数组 = 没有可编辑的图形）
+      editHandles: editable ? shapeHandles(editable) : [],
+      hotEdit: this.hotEdit,
+      accent: ACCENT,
+      maskAlpha: MASK_ALPHA,
+      handleSize: this.handleSize,
+      // 自绘工具光标：笔刷圈（橡皮/马赛克线条/记号笔）或箭头的圆点+四向短线
+      toolCursor:
+        cur && this.pointer && !grabHandle
+          ? { x: this.pointer.x, y: this.pointer.y, r: cur.r, kind: cur.kind, color: s.props.color }
+          : null,
+      // 自绘细十字（取代系统那枚又粗又大的 IDC_CROSS）
+      cross:
+        this.drawCross && this.pointer && !grabHandle
+          ? { x: this.pointer.x, y: this.pointer.y, arm: Math.max(5, Math.round(6 * this.scale)) }
+          : null,
+    };
+    paint(this.ctx, { w: this.layout.physW, h: this.layout.physH }, input);
+    // 光标层单独叫：paint() 在取色/无选区时会提前返回，画在它里面会被整层跳过
+    paintCursor(this.ctx, input);
     this.publishFrameInfo();
     if (!this.paintedOnce) {
       this.paintedOnce = true;
@@ -632,16 +635,16 @@ export class OverlayController {
     if (a?.mode === "resize") c = CURSOR_FOR_HANDLE[a.handle];
     else if (a?.mode === "shape-edit") c = this.editCursor(a.key);
     else if (a?.mode === "move" || a?.mode === "shape-move") c = "move";
-    // 压在「刚画完那支」的句柄上：此时工具还开着（默认是十字），但这一格该给反馈
+    // 压在「刚画完那支」的句柄上：此时工具还开着（默认是绘制光标），
+    // 但这一格该只给选择光标 —— 两种光标不能同屏
     else if (this.hotEdit) c = this.editCursor(this.hotEdit);
-    // 该工具要自绘光标（笔刷圈 / 箭头的圆点短线）时隐藏系统光标，
-    // 避免自绘图形+系统光标打架；其余形状类工具仍用（自绘的）十字
+    // 选区手柄同理优先于绘制光标（否则"看得见手柄却抓不动"，或两种光标叠着）
+    else if (this.hotHandle) c = CURSOR_FOR_HANDLE[this.hotHandle];
+    // 该工具要自绘光标（笔刷圈 / 圆点短线）时隐藏系统光标，避免两个光标打架
     else if (this.toolCursor()) c = "none";
     else if (s.pendingTextAt) c = "text";
     else if (s.phase === "adjusting" && p) {
-      // 选区手柄优先：工具开着也要给方向缩放光标（否则"看得见却抓不动"）
-      if (this.hotHandle) c = CURSOR_FOR_HANDLE[this.hotHandle];
-      else if (!s.tool && (this.hoverShapeId !== null || this.inSel(p))) c = "move";
+      if (!s.tool && (this.hoverShapeId !== null || this.inSel(p))) c = "move";
     }
     /* 系统 crosshair 太粗太大（Windows IDC_CROSS ≈19px、2px 黑线），换成画布自绘的
        细十字：1px 黑线 + 白晕，中心正落在指针热点上。录屏实测 Snipaste 的十字是
