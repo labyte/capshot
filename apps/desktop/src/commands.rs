@@ -314,13 +314,24 @@ pub struct ExportReq {
 }
 
 #[tauri::command]
-pub async fn export_result(app: AppHandle, req: ExportReq, state: State<'_, AppState>) -> Result<serde_json::Value, ApiError> {
-    export_core(&app, &req, &state)
+pub async fn export_result(
+    app: AppHandle,
+    webview_window: tauri::WebviewWindow,
+    req: ExportReq,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, ApiError> {
+    export_core(&app, &webview_window, &req, &state)
 }
 
 /// 导出核心：命令面与贴图右键菜单走同一条路径（菜单原先想复用只能把入库逻辑整段复制）。
 /// 声明为同步函数 —— 函数体里本来就没有 await。
-pub fn export_core(app: &AppHandle, req: &ExportReq, state: &AppState) -> Result<serde_json::Value, ApiError> {
+/// parent = 发起导出的窗口（截图层/贴图窗），另存为对话框挂它下面才能浮在置顶窗之上。
+pub fn export_core(
+    app: &AppHandle,
+    parent: &tauri::WebviewWindow,
+    req: &ExportReq,
+    state: &AppState,
+) -> Result<serde_json::Value, ApiError> {
     log::info!("export_result enter op={} sel={}", req.op, req.sel);
     let sel = {
         let mut g = state.selections.lock().unwrap();
@@ -346,6 +357,20 @@ pub fn export_core(app: &AppHandle, req: &ExportReq, state: &AppState) -> Result
 
     let mut result = serde_json::json!({ "op": req.op });
 
+    // 保存：先弹「另存为」让用户选位置，而不是直接落到默认历史目录。
+    // 取消 → 整次保存作废（不写历史、不关截图层），用户可继续标注或改走复制。
+    let save_target = if req.op == "save" || req.op == "copySave" {
+        match pick_save_path(app, parent) {
+            Some(p) => Some(p),
+            None => {
+                log::info!("export_result save cancelled");
+                return Ok(serde_json::json!({ "op": req.op, "cancelled": true }));
+            }
+        }
+    } else {
+        None
+    };
+
     // 历史落库（copySave/save/pin 都入历史；纯 copy 也入 —— 便于找回，计划 §6.3）
     let thumb = capture_core::encode::to_thumbnail(&sel.frame).unwrap_or_default();
     let day = {
@@ -364,18 +389,18 @@ pub fn export_core(app: &AppHandle, req: &ExportReq, state: &AppState) -> Result
         copy_to_clipboard(state, &sel)?;
     }
     if req.op == "save" || req.op == "copySave" {
-        let path = {
-            let h = state.history.lock().unwrap();
-            h.png_path(id).unwrap_or_default()
-        };
-        result["path"] = serde_json::json!(path.display().to_string());
+        // 写用户选定的路径；历史目录里那份是内部留档（供历史面板/重编辑），两者并存
+        let target = save_target.unwrap_or_default();
+        std::fs::write(&target, &sel.png)
+            .map_err(|e| ApiError { code: "save_failed", message: e.to_string() })?;
+        result["path"] = serde_json::json!(target.display().to_string());
         // 保存成功的可见反馈（此前"存图无效"实为静默成功）
         use tauri_plugin_notification::NotificationExt;
         if let Err(e) = app
             .notification()
             .builder()
             .title("CapsShot 已保存")
-            .body(path.display().to_string())
+            .body(target.display().to_string())
             .show()
         {
             log::warn!("save notification failed: {e}");
@@ -396,6 +421,20 @@ pub fn export_core(app: &AppHandle, req: &ExportReq, state: &AppState) -> Result
     close_session_overlays(app, state);
     log::info!("export_result done op={} id={}", req.op, result["id"]);
     Ok(result)
+}
+
+/// 「另存为」原生对话框：默认名走历史同一时间戳模板，PNG 过滤器。
+/// 返回 None = 用户取消。blocking：命令在 tokio 工作线程上跑，不卡主线程。
+fn pick_save_path(app: &AppHandle, parent: &tauri::WebviewWindow) -> Option<std::path::PathBuf> {
+    use tauri_plugin_dialog::DialogExt;
+    app.dialog()
+        .file()
+        // 挂到发起窗口下：截图层/贴图窗是 always-on-top，无属主的原生对话框会被它盖住看不见
+        .set_parent(parent)
+        .add_filter("PNG 图片", &["png"])
+        .set_file_name(&history::default_save_name())
+        .blocking_save_file()
+        .and_then(|fp| fp.into_path().ok())
 }
 
 fn copy_to_clipboard(state: &AppState, sel: &Sel) -> Result<(), ApiError> {

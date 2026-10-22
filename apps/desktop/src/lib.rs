@@ -27,6 +27,7 @@ pub fn run() {
             None,
         ))
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(
             // 单一 handler 按「哪把键触发」分派。比对的是解析后的 Shortcut，
             // 不是字符串 —— Display 形是大写规范名，与用户存的原始写法对不上。

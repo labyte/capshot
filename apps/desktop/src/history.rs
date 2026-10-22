@@ -195,6 +195,31 @@ pub fn epoch_day_key(ts: i64) -> String {
     format!("{y:04}{m:02}{d:02}")
 }
 
+/// 「另存为」对话框的默认文件名（UTC 时间戳 + .png），与历史留档命名同一模板。
+pub fn default_save_name() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let (yy, mm, dd) = epoch_days_to_date(now / 86400);
+    let sod = secs_of_day(now);
+    let name = filename::render(
+        filename::DEFAULT_TEMPLATE,
+        &filename::Stamp {
+            yyyy: yy as u16,
+            mm: mm as u8,
+            dd: dd as u8,
+            hh: (sod / 3600) as u8,
+            min: ((sod / 60) % 60) as u8,
+            sec: (sod % 60) as u8,
+            seq: 1,
+            app: None,
+            title: None,
+        },
+    );
+    format!("{name}.png")
+}
+
 fn secs_of_day(ts: i64) -> i64 {
     (ts % 86400 + 86400) % 86400
 }
