@@ -1124,7 +1124,44 @@ export class OverlayController {
 
   setProps(patch: Partial<DrawProps>): void {
     this.store.set({ props: { ...this.state.props, ...patch } });
+    this.applyPropsToEditable(patch);
     this.mark();
+  }
+
+  /**
+   * 属性栏/滚轮的改动落到「刚画完那一支」上 —— 句柄还活着 = 它仍是当前作品
+   * （对齐 §4：此时改箭头样式、点色板都作用在这一支；点别处定稿后就不再改它）。
+   *
+   * 只镜像**已有图形身上真有的字段**：颜色、线宽，以及箭头的头部样式与单/双向。
+   * 其余（记号笔矩形模式、橡皮半径、马赛克粒度…）是"下一笔怎么画"的参数，
+   * 拿它们去改一支已经画完的图形没有意义。
+   */
+  private applyPropsToEditable(patch: Partial<DrawProps>): void {
+    const sh = this.editableShape();
+    if (!sh) return;
+    let changed = false;
+    if (patch.color !== undefined && sh.color !== patch.color) {
+      sh.color = patch.color;
+      changed = true;
+    }
+    if (patch.width !== undefined) {
+      const phys = patch.width * this.scale; // 图形存物理 px，与 beginShape 一致
+      if (Math.abs(sh.width - phys) > 0.01) {
+        sh.width = phys;
+        changed = true;
+      }
+    }
+    if (sh.kind === "arrow") {
+      if (patch.arrowHead !== undefined && sh.head !== patch.arrowHead) {
+        sh.head = patch.arrowHead;
+        changed = true;
+      }
+      if (patch.arrowDouble !== undefined && sh.double !== patch.arrowDouble) {
+        sh.double = patch.arrowDouble;
+        changed = true;
+      }
+    }
+    if (changed) this.touchShapes();
   }
 
   /**
@@ -1198,16 +1235,9 @@ export class OverlayController {
       // 步长 ×2：范围放宽到 4–80 后，一格 1px 要滚 76 下太磨人
       this.setProps({ eraserRadius: clamp(p.eraserRadius + dir * 2, MIN_ERASER, MAX_ERASER) });
     } else if (t !== "text") {
-      const w = clamp(p.width + dir, MIN_WIDTH, MAX_WIDTH);
-      this.setProps({ width: w });
-      // 句柄还活着 = 这一支仍是"当前作品"：滚轮调的线宽要立刻落到它身上，
-      // 而不是只改默认值等下一支才生效（箭头 / 记号笔 / 画笔同一语义，
-      // 与"点选图形后滚轮改它自己的宽度"那条走的是同一件事）
-      const sh = this.editableShape();
-      if (sh) {
-        sh.width = w * this.scale; // 图形存物理 px，与 beginShape 的换算一致
-        this.touchShapes();
-      }
+      // 滚轮改宽：setProps 里那条 applyPropsToEditable 会顺手落到「刚画完那一支」上，
+      // 所以这里只管改默认值，不必再单独摸一次图形（线宽与颜色、箭头样式同一条路）
+      this.setProps({ width: clamp(p.width + dir, MIN_WIDTH, MAX_WIDTH) });
     }
   }
 
