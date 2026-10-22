@@ -418,7 +418,8 @@ export class OverlayController {
     const editable = this.editableShape();
     /* 压在手柄/句柄上时只给系统选择光标，绘制光标（圈、圆点短线、细十字）整层让位 ——
        两种光标同屏会互相看不懂 */
-    const grabHandle = this.hotEdit !== null || this.hotHandle !== null;
+    const grabHandle =
+      this.hotEdit !== null || (this.hotHandle !== null && s.tool === null);
     if (!this.reader) {
       // 懒建：放大镜真要读像素才铺一张全幅 CPU 后端画布
       this.reader = new PixelReader(this.frame, this.frame.width, this.frame.height);
@@ -639,8 +640,10 @@ export class OverlayController {
     // 压在「刚画完那支」的句柄上：此时工具还开着（默认是绘制光标），
     // 但这一格该只给选择光标 —— 两种光标不能同屏
     else if (this.hotEdit) c = this.editCursor(this.hotEdit);
-    // 选区手柄同理优先于绘制光标（否则"看得见手柄却抓不动"，或两种光标叠着）
-    else if (this.hotHandle) c = CURSOR_FOR_HANDLE[this.hotHandle];
+    /* 选区手柄只在**没有工具激活**时才抢光标。有工具时它常年在选区边框上（一半还压在
+       暗区里），一靠近就换成系统缩放光标 —— 用户明确要的是"非工具条区域一律显示当前
+       标注光标"。手柄照样能抓：pointerdown 里的判定顺序不变。 */
+    else if (this.hotHandle && !s.tool) c = CURSOR_FOR_HANDLE[this.hotHandle];
     // 该工具要自绘光标（笔刷圈 / 圆点短线）时隐藏系统光标，避免两个光标打架
     else if (this.toolCursor()) c = "none";
     // 文字工具：定位时就是 I 梁（"这里能打字"），不该还是个十字
@@ -675,7 +678,8 @@ export class OverlayController {
     // 选区手柄**任何工具下都可抓**（随时可调选区）；图形悬停反馈只在没有工具时给
     const h = idle ? this.hitHandle(p) : null;
     const sh = idle && !h && !s.tool ? this.shapeAt(p) : null;
-    const id = sh && this.inSel(p) ? sh.id : null;
+    // 不再要求 inSel：画在选区外的标注也要能悬停/点选（与"标注不被选区裁剪"配套）
+    const id = sh ? sh.id : null;
     if (ei === nextEdit && h === this.hotHandle && id === this.hoverShapeId) return;
     this.hotEdit = nextEdit;
     this.hotHandle = h;
@@ -735,7 +739,8 @@ export class OverlayController {
     if (s.phase === "adjusting" && !s.tool) {
       // 先试命中已有图形（阶段 2 的再选中入口），再试手柄/整体移动
       const hitShape = this.shapeAt(p);
-      if (hitShape && this.inSel(p)) {
+      // 选区外的标注同样可点选拖动：标注画在整块屏上，导出才按选区裁
+      if (hitShape) {
         // 快照原图 + 每次从原点重算，避免逐帧累加漂移
         this.pushUndo();
         this.store.set({ selectedId: hitShape.id });

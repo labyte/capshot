@@ -67,7 +67,11 @@ export function paint(
   ctx.fillRect(0, y, x, h);
   ctx.fillRect(x + w, y, out.w - x - w, h);
 
-  drawShapes(ctx, i.shapes, i.sel, i.deps);
+  /* 标注**不再被选区裁掉**：在选区外（暗区）落的笔也看得见，
+     与"随时可调选区"配套 —— 把选区放大就能露出先前画在外面的部分。
+     导出仍只取选区那块（renderFinalPng 的画布尺寸就是 sel.w×sel.h，天然裁掉），
+     所以"画在外面"的内容不会凭空进入成图。 */
+  drawShapes(ctx, i.shapes, null, i.deps);
 
   ctx.strokeStyle = i.accent;
   ctx.lineWidth = Math.max(1, i.handleSize / 6);
