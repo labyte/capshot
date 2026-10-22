@@ -388,22 +388,29 @@ export class OverlayController {
    *   查无实据（官方包里无任何光标图资源），已撤回
    * - 矩形模式（markerRect / eraserRect）与形状类工具一律系统十字
    */
-  private brushRadius(): number | null {
+  private toolCursor(): { kind: "ring" | "dotTicks"; r: number } | null {
     const s = this.state;
     if (s.phase !== "adjusting" && s.phase !== "tool-drawing") return null;
     const sc = this.scale;
     const p = s.props;
-    if (s.tool === "eraser" && !p.eraserRect) return p.eraserRadius * sc;
-    if (s.tool === "mosaic" && p.mosaicMode === "line") return (p.mosaicBrush * sc) / 2;
+    if (s.tool === "eraser" && !p.eraserRect) return { kind: "ring", r: p.eraserRadius * sc };
+    if (s.tool === "mosaic" && p.mosaicMode === "line") {
+      return { kind: "ring", r: (p.mosaicBrush * sc) / 2 };
+    }
     // 记号笔：固定工具圈（录屏实测直径 ~15px @100%，与线宽无关）
-    if (s.tool === "marker" && !p.markerRect) return 7.5 * sc;
+    if (s.tool === "marker" && !p.markerRect) return { kind: "ring", r: 7.5 * sc };
+    /* 箭头：圆点 + 四向短线，点径随线宽实时变、颜色用当前标注色（录屏 t=86/130/134：
+       红色大点 → 红色小点，正是滚轮改线宽的前后两态）。
+       上一轮我拿 t=83（矩形工具拖角）和 t=127（箭头已定稿）当成了箭头光标，样本取错，
+       把这条误撤了 —— 文档 §4 原话是对的。 */
+    if (s.tool === "arrow") return { kind: "dotTicks", r: Math.max(3, (p.width * sc) / 2) };
     return null;
   }
 
   private draw(): void {
     if (!this.frame) return;
     const s = this.state;
-    const ring = this.brushRadius();
+    const cur = this.toolCursor();
     const editable = this.editableShape();
     if (!this.reader) {
       // 懒建：放大镜真要读像素才铺一张全幅 CPU 后端画布
@@ -419,8 +426,12 @@ export class OverlayController {
         sel: s.sel,
         shapes: s.shapes,
         deps: { source: this.frame, scale: this.scale, scratch: this.scratch },
-        // 重编辑里选区就是整幅图，画 8 向手柄只会沿图片边缘一圈噪声
-        showHandles: s.phase === "adjusting" && s.toolbarVisible && !s.tool && !this.isEditor,
+        /* 选区的 8 向手柄**常驻**：切到绘图工具、甚至正在拖一笔，都照样显示照样抓
+           （用户要求：随时可调截图选区）。重编辑里选区就是整幅图，画一圈手柄只是噪声。 */
+        showHandles:
+          (s.phase === "adjusting" || s.phase === "tool-drawing") &&
+          s.toolbarVisible &&
+          !this.isEditor,
         selectedId: s.selectedId,
         hoverId: this.hoverShapeId,
         hotHandle: this.hotHandle,
@@ -430,9 +441,10 @@ export class OverlayController {
         accent: ACCENT,
         maskAlpha: MASK_ALPHA,
         handleSize: this.handleSize,
-        brushCursor:
-          ring !== null && this.pointer
-            ? { x: this.pointer.x, y: this.pointer.y, r: ring }
+        // 自绘工具光标：笔刷圈（橡皮/马赛克线条/记号笔）或箭头的圆点+四向短线
+        toolCursor:
+          cur && this.pointer
+            ? { x: this.pointer.x, y: this.pointer.y, r: cur.r, kind: cur.kind, color: s.props.color }
             : null,
         // 自绘细十字（取代系统那枚又粗又大的 IDC_CROSS）
         cross:
@@ -622,13 +634,14 @@ export class OverlayController {
     else if (a?.mode === "move" || a?.mode === "shape-move") c = "move";
     // 压在「刚画完那支」的句柄上：此时工具还开着（默认是十字），但这一格该给反馈
     else if (this.hotEdit) c = this.editCursor(this.hotEdit);
-    // 该工具要自绘笔刷圈（橡皮圆头 / 马赛克线条 / 画笔）时隐藏系统光标，
-    // 避免圈+十字双光标打架；矩形模式、形状类工具仍用十字
-    else if (this.brushRadius() !== null) c = "none";
+    // 该工具要自绘光标（笔刷圈 / 箭头的圆点短线）时隐藏系统光标，
+    // 避免自绘图形+系统光标打架；其余形状类工具仍用（自绘的）十字
+    else if (this.toolCursor()) c = "none";
     else if (s.pendingTextAt) c = "text";
-    else if (s.phase === "adjusting" && !s.tool && p) {
+    else if (s.phase === "adjusting" && p) {
+      // 选区手柄优先：工具开着也要给方向缩放光标（否则"看得见却抓不动"）
       if (this.hotHandle) c = CURSOR_FOR_HANDLE[this.hotHandle];
-      else if (this.hoverShapeId !== null || this.inSel(p)) c = "move";
+      else if (!s.tool && (this.hoverShapeId !== null || this.inSel(p))) c = "move";
     }
     /* 系统 crosshair 太粗太大（Windows IDC_CROSS ≈19px、2px 黑线），换成画布自绘的
        细十字：1px 黑线 + 白晕，中心正落在指针热点上。录屏实测 Snipaste 的十字是
@@ -653,9 +666,10 @@ export class OverlayController {
     // （本方法只在没有按下锚点时被调用，不必再判 drawing/tool-drawing）
     const ei = this.hotEdit;
     const nextEdit = this.hitEditable(p);
-    const on = s.phase === "adjusting" && !s.tool && !s.pendingTextAt && nextEdit === null;
-    const h = on ? this.hitHandle(p) : null;
-    const sh = on && !h ? this.shapeAt(p) : null;
+    const idle = s.phase === "adjusting" && !s.pendingTextAt && nextEdit === null;
+    // 选区手柄**任何工具下都可抓**（随时可调选区）；图形悬停反馈只在没有工具时给
+    const h = idle ? this.hitHandle(p) : null;
+    const sh = idle && !h && !s.tool ? this.shapeAt(p) : null;
     const id = sh && this.inSel(p) ? sh.id : null;
     if (ei === nextEdit && h === this.hotHandle && id === this.hoverShapeId) return;
     this.hotEdit = nextEdit;
@@ -744,6 +758,14 @@ export class OverlayController {
     }
 
     if (s.tool && s.sel) {
+      // 选区 8 向手柄**先于**"起笔画新一支"判定：工具开着也要能随时调选区，
+      // 否则手柄显示着却一按就变成画图形
+      const h = this.hitHandle(p);
+      if (h) {
+        this.anchor = { mode: "resize", handle: h, rect0: { ...s.sel }, start: p };
+        this.mark();
+        return;
+      }
       this.beginShape(p);
       return;
     }

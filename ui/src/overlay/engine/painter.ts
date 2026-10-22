@@ -25,8 +25,12 @@ export interface PaintInput {
   accent: string;
   maskAlpha: number;
   handleSize: number;
-  /** 自绘笔刷圈（物理 px，跟随光标；r=半径），null = 用系统光标 */
-  brushCursor: { x: number; y: number; r: number } | null;
+  /**
+   * 自绘工具光标（物理 px，跟随光标），null = 用系统光标。
+   * ring = 笔刷圈（橡皮圆头 / 马赛克线条 / 记号笔）；
+   * dotTicks = 圆点 + 四向短线（箭头），点用**当前标注色**、直径随线宽变。
+   */
+  toolCursor: { x: number; y: number; r: number; kind: "ring" | "dotTicks"; color: string } | null;
   /** 自绘细十字（arm=半长，物理 px）。系统 crosshair 太粗太大时用它，null = 不画 */
   cross: { x: number; y: number; arm: number } | null;
 }
@@ -121,18 +125,54 @@ export function paint(
      录屏实测 Snipaste 的环：半透明白填充（环内比环外亮）+ 深色描边，**圈内没有十字** ——
      原先那个"中心十字瞄准点"是我们自己加的，已去掉。
      白色下描边保留：实测底是粉色看不出深色环在深底上够不够，多一道白边稳一点。 */
-  if (i.brushCursor) {
-    const { x, y, r } = i.brushCursor;
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(255,255,255,0.18)";
-    ctx.fill();
-    ctx.lineWidth = Math.max(1.5, r / 12);
-    ctx.strokeStyle = "#fff";
-    ctx.stroke();
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = "rgba(0,0,0,0.5)";
-    ctx.stroke();
+  if (i.toolCursor) {
+    const { x, y, r, kind, color } = i.toolCursor;
+    if (kind === "ring") {
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255,255,255,0.18)";
+      ctx.fill();
+      ctx.lineWidth = Math.max(1.5, r / 12);
+      ctx.strokeStyle = "#fff";
+      ctx.stroke();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(0,0,0,0.5)";
+      ctx.stroke();
+    } else {
+      /* 箭头：圆点 + 四向短线，**用当前标注色**（录屏 t=86/130/134 都是红点红短线），
+         点径随线宽实时变。先铺一层白底再上色，深底浅底都看得清。 */
+      const rr = Math.max(2.5, r);
+      ctx.beginPath();
+      ctx.arc(x, y, rr + 1.5, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255,255,255,0.85)";
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(x, y, rr, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+      const gap = rr + Math.max(3, rr * 0.5);
+      const tick = Math.max(3, rr * 0.7);
+      const thick = Math.max(1.5, rr * 0.3);
+      for (const [col, w] of [
+        ["rgba(255,255,255,0.85)", thick + 2.5],
+        [color, thick],
+      ] as const) {
+        ctx.strokeStyle = col;
+        ctx.lineWidth = w;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        for (const [dx, dy] of [
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1],
+        ] as const) {
+          ctx.moveTo(x + dx * gap, y + dy * gap);
+          ctx.lineTo(x + dx * (gap + tick), y + dy * (gap + tick));
+        }
+        ctx.stroke();
+      }
+    }
   }
 
   /* 自绘细十字（取代系统 crosshair：那枚约 19px、2px 黑线，太粗太大）。

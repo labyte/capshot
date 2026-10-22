@@ -251,8 +251,9 @@ export interface ShapeHandle {
 /** 画完之后能不能当场调形状（Snipaste：只有刚画完那一支给句柄，点别处即锁死） */
 export function canEditShape(s: Shape): boolean {
   switch (s.kind) {
+    // 画笔（polyline）**不给句柄**：自由笔迹拉首末点等于把笔迹重采样，
+    // 那是重画不是调整，用户也明确要求去掉
     case "arrow":
-    case "polyline":
     case "marker":
       return true;
     // 矩形/椭圆 = 四角 + 四边中点共 8 向句柄；记号笔的矩形高亮框不算
@@ -276,7 +277,6 @@ export function shapeHandles(s: Shape): ShapeHandle[] {
         { k: "a", x: s.a.x, y: s.a.y },
         { k: "b", x: s.b.x, y: s.b.y },
       ];
-    case "polyline":
     case "marker":
       if (s.pts.length < 2) return [];
       return [
