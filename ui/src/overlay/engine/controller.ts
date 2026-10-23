@@ -5,6 +5,7 @@ import { invoke, u8ToB64 } from "../../shared/ipc";
 import { getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
 import { createStore } from "./store";
 import { paint, paintCursor, type PaintInput } from "./painter";
+import { cursorUrl } from "./cursorImage";
 import { PixelReader } from "./pixelReader";
 import { makeScratch } from "../../annotate/mosaic";
 import { drawShapes } from "../../annotate/render";
@@ -447,15 +448,10 @@ export class OverlayController {
       maskAlpha: MASK_ALPHA,
       handleSize: this.handleSize,
       // 自绘工具光标：笔刷圈（橡皮/马赛克线条/记号笔）或箭头的圆点+四向短线
-      toolCursor:
-        drawn && drawn.kind !== "cross" && this.pointer
-          ? { x: this.pointer.x, y: this.pointer.y, r: drawn.r, kind: drawn.kind, color: s.props.color }
-          : null,
-      // 自绘细十字（取代系统那枚又粗又大的 IDC_CROSS）
-      cross:
-        drawn?.kind === "cross" && this.pointer
-          ? { x: this.pointer.x, y: this.pointer.y, arm: drawn.r }
-          : null,
+      // 只有超大笔刷才需要：画布补一圈尺寸预览（十字已是光标图，不再自绘）
+      toolCursor: drawn && this.pointer
+        ? { x: this.pointer.x, y: this.pointer.y, r: drawn.r, kind: drawn.kind }
+        : null,
     };
     paint(this.ctx, { w: this.layout.physW, h: this.layout.physH }, input);
     // 光标层单独叫：paint() 在取色/无选区时会提前返回，画在它里面会被整层跳过
@@ -640,7 +636,8 @@ export class OverlayController {
    */
   private cursorPlan(): {
     css: string;
-    drawn: { kind: "ring" | "dotTicks" | "dot" | "dashDot" | "cross"; r: number } | null;
+    /** 只有超过光标图尺寸的笔刷（橡皮 / 马赛克）才需要画布补一圈尺寸预览 */
+    drawn: { kind: "ring" | "dashDot"; r: number } | null;
   } {
     const s = this.state;
     const p = this.pointer;
@@ -658,8 +655,19 @@ export class OverlayController {
     if (s.tool === "text" || s.pendingTextAt) return { css: "text", drawn: null };
     if (!s.tool && s.phase === "adjusting" && (this.hoverShapeId !== null || this.inSel(p)))
       return { css: "move", drawn: null };
+    /* 一律给"真实光标图"（cursor: url(...) 热点），不再用 `cursor: none` + 画布自绘：
+       WebView2 从具名光标切回 none 不立即生效，会留下"缩放光标 + 绘制光标"双光标（实测）。
+       只要系统里始终有一个真实光标，就不存在"该隐藏却没隐藏"这个状态。
+       超过光标图上限（32px）的笔刷 —— 橡皮 4–80、马赛克 8–80 —— 仍由画布补一圈
+       尺寸预览，光标本身给细十字做精确定位。 */
+    const cross = cursorUrl("cross", this.crossArm() / this.scale, "");
     const tc = this.toolCursor();
-    return { css: "none", drawn: tc ? { kind: tc.kind, r: tc.r } : { kind: "cross", r: this.crossArm() } };
+    if (!tc) return { css: cross, drawn: null };
+    if (tc.kind === "ring" || tc.kind === "dashDot")
+      return { css: cross, drawn: { kind: tc.kind, r: tc.r } };
+    if (tc.kind === "dot")
+      return { css: cursorUrl("dot", tc.r / this.scale, s.props.color), drawn: null };
+    return { css: cursorUrl("dotTicks", tc.r / this.scale, s.props.color), drawn: null };
   }
 
   /** 把决策里的系统光标写到 canvas 上（值没变不写，省一次样式重算） */

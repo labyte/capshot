@@ -30,15 +30,7 @@ export interface PaintInput {
    * ring = 笔刷圈（橡皮圆头 / 马赛克线条 / 记号笔）；
    * dotTicks = 圆点 + 四向短线（箭头），点用**当前标注色**、直径随线宽变。
    */
-  toolCursor: {
-    x: number;
-    y: number;
-    r: number;
-    kind: "ring" | "dotTicks" | "dot" | "dashDot";
-    color: string;
-  } | null;
-  /** 自绘细十字（arm=半长，物理 px）。系统 crosshair 太粗太大时用它，null = 不画 */
-  cross: { x: number; y: number; arm: number } | null;
+  toolCursor: { x: number; y: number; r: number; kind: "ring" | "dashDot" } | null;
 }
 
 export function paint(
@@ -136,108 +128,43 @@ export function paint(
   // 光标若画在它后面就会被整层跳过：此时系统光标已被置成 none，指针就彻底消失了。
 }
 
-/** 光标层（笔刷圈 / 箭头圆点短线 / 细十字）：永远画在场景之上 */
+/**
+ * 超大笔刷的尺寸预览圈（橡皮 4–80 / 马赛克 8–80 超过光标图 32px 上限时才用到）。
+ * 其余光标（细十字、箭头/画笔圆点短线、记号笔实心圆）都是**真正的 CSS 光标图**
+ * （见 cursorImage.ts），不在画布上画 —— 画布画光标那个方案已经被否掉：
+ * WebView2 从具名光标切回 `cursor: none` 不生效，会留下双光标。
+ */
 export function paintCursor(ctx: CanvasRenderingContext2D, i: PaintInput): void {
-  /* 自绘工具光标（此时系统光标被 cursorPlan 置成 none）：
-     ring = 橡皮圆头、dashDot = 马赛克线条、dot = 记号笔实心圆、dotTicks = 箭头/画笔圆点短线。
-     环径一律 = 实际笔刷/线宽，滚轮改档当场跟着变。
-     录屏实测 Snipaste 的环是半透明白填充（环内比环外亮）+ 深色描边，**圈内没有十字** ——
-     原先那个"中心十字瞄准点"是我们自己加的，已去掉。 */
-  if (i.toolCursor) {
-    const { x, y, r, kind, color } = i.toolCursor;
-    if (kind === "ring") {
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(255,255,255,0.18)";
-      ctx.fill();
-      ctx.lineWidth = Math.max(1.5, r / 12);
-      ctx.strokeStyle = "#fff";
-      ctx.stroke();
-      ctx.lineWidth = 1;
-      ctx.strokeStyle = "rgba(0,0,0,0.5)";
-      ctx.stroke();
-    } else if (kind === "dot") {
-      // 记号笔：实心工具圆（用户指定实心）。半透明当前色 + 一圈实边，
-      // 与它画出来的高亮同一个观感，浅底深底都看得见。
-      const rr = Math.max(3, r);
-      ctx.save();
-      ctx.globalAlpha = 0.55;
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.arc(x, y, rr, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-      ctx.lineWidth = 1;
-      ctx.strokeStyle = color;
-      ctx.beginPath();
-      ctx.arc(x, y, rr, 0, Math.PI * 2);
-      ctx.stroke();
-    } else if (kind === "dashDot") {
-      /* 马赛克：实心 + 虚线边（用户指定）。打码不涉及颜色，所以用中性灰填充 +
-         白晕深虚线双描边 —— 深浅截图上都要看得见。环径仍随笔刷直径实时变。 */
-      const rr = Math.max(4, r);
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(x, y, rr, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(128,128,128,0.35)";
-      ctx.fill();
-      ctx.setLineDash([Math.max(2, rr * 0.35), Math.max(2, rr * 0.3)]);
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = "rgba(255,255,255,0.85)";
-      ctx.stroke();
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = "rgba(0,0,0,0.7)";
-      ctx.stroke();
-      ctx.restore();
-    } else {
-      /* 箭头 / 画笔：圆点 + 四向短线，**纯当前标注色，不加白描边**（用户要求：
-         白晕在浅底上反而糊成一团）。点径随线宽实时变（录屏 t=86 大点 ↔ t=130 小点）。 */
-      const rr = Math.max(2.5, r);
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.arc(x, y, rr, 0, Math.PI * 2);
-      ctx.fill();
-      const gap = rr + Math.max(3, rr * 0.5);
-      const tick = Math.max(3, rr * 0.7);
-      ctx.strokeStyle = color;
-      ctx.lineWidth = Math.max(1.5, rr * 0.3);
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      for (const [dx, dy] of [
-        [1, 0],
-        [-1, 0],
-        [0, 1],
-        [0, -1],
-      ] as const) {
-        ctx.moveTo(x + dx * gap, y + dy * gap);
-        ctx.lineTo(x + dx * (gap + tick), y + dy * (gap + tick));
-      }
-      ctx.stroke();
-    }
-  }
-
-  /* 自绘细十字（取代系统 crosshair：那枚约 19px、2px 黑线，太粗太大）。
-     录屏实测 Snipaste 是 15px / 1px —— 1px 黑线 + 白晕影，中心正落在指针热点上。
-     坐标 +0.5 让 1px 线压在像素中心，否则会被抗锯齿糊成 2px 灰线。 */
-  if (i.cross) {
-    const { x, y, arm } = i.cross;
-    const px = Math.round(x) + 0.5;
-    const py = Math.round(y) + 0.5;
+  if (!i.toolCursor) return;
+  const { x, y, r, kind } = i.toolCursor;
+  if (kind === "dashDot") {
+    /* 马赛克：实心 + 虚线边（用户指定）。打码不涉及颜色 → 中性灰实心 + 白晕深虚线双描边。 */
+    const rr = Math.max(4, r);
     ctx.save();
-    ctx.lineCap = "butt";
-    for (const [col, w] of [
-      ["rgba(255,255,255,0.8)", 3],
-      ["#000", 1],
-    ] as const) {
-      ctx.strokeStyle = col;
-      ctx.lineWidth = w;
-      ctx.beginPath();
-      ctx.moveTo(px - arm, py);
-      ctx.lineTo(px + arm, py);
-      ctx.moveTo(px, py - arm);
-      ctx.lineTo(px, py + arm);
-      ctx.stroke();
-    }
+    ctx.beginPath();
+    ctx.arc(x, y, rr, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(128,128,128,0.35)";
+    ctx.fill();
+    ctx.setLineDash([Math.max(2, rr * 0.35), Math.max(2, rr * 0.3)]);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(255,255,255,0.85)";
+    ctx.stroke();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "rgba(0,0,0,0.7)";
+    ctx.stroke();
     ctx.restore();
+    return;
   }
+  /* 橡皮圆头：录屏实测 Snipaste 的环是半透明白填充（环内比环外亮）+ 深色描边，
+     圈内没有十字（中心定位交给光标的细十字）。 */
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(255,255,255,0.18)";
+  ctx.fill();
+  ctx.lineWidth = Math.max(1.5, r / 12);
+  ctx.strokeStyle = "#fff";
+  ctx.stroke();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = "rgba(0,0,0,0.5)";
+  ctx.stroke();
 }
