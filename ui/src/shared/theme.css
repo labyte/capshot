@@ -447,13 +447,35 @@ body.settings code {
 
 /* 箭头样式下拉：符号加粗（—/→/↔ 线条更实），收紧内边距让选中项贴住框体、去掉大空隙 */
 /* 马赛克大小滑块：贴合浅灰属性栏，细轨道 + 蓝色滑块头 */
+/* 粒度滑块：要"细" —— 3px 轨道 + 9px 圆头，自绘而非 UA 默认（默认控件粗、各平台还不一致）。
+   光标沿用 bar 的统一规则（普通箭头），不恢复成手型。 */
 .snip-range {
-  width: 84px;
-  height: 24px;
-  margin: 0 2px;
-  accent-color: var(--tb-accent);
-  cursor: default;
+  width: 96px;
+  height: 20px;
+  margin: 0 4px;
   background: transparent;
+  cursor: default;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.snip-range::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--tb-sep);
+}
+.snip-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 9px;
+  height: 9px;
+  margin-top: -3px; /* (3px 轨道 − 9px 拇指)/2 → 拇指垂直居中 */
+  border-radius: 50%;
+  background: var(--tb-accent);
+  border: 1px solid #fff;
+}
+.snip-range:focus { outline: none; }
+.snip-range:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 2px rgba(32, 128, 240, 0.4);
 }
 
 .snip-astyle {

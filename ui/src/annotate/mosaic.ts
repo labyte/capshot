@@ -4,7 +4,16 @@
 
 import type { Rect } from "../overlay/engine/types";
 
-/** 像素化：把 r 区域降到 1/level 再无平滑放大回来 */
+/**
+ * 像素化。旧做法是"缩小到 sw×sh 再无平滑放大"，但 `sw = floor(r.w/bs)` 放大回去后
+ * 每块宽 = r.w/sw ≠ bs，于是**同一张马赛克里有的块 8px、有的 9px**，看着抖且发糊；
+ * 相邻两个马赛克图形还各自一套网格，拼起来错位。
+ *
+ * 现在：**网格按 bs 对齐到整帧原点**（`x0 = floor(r.x/bs)*bs`），取样矩形与目标尺寸都是
+ * bs 的整数倍 → 一次面积平均 + 一次最近邻放大，每块必然正好 bs×bs。
+ * 成本仍是两次 drawImage。中途试过"getImageData + 每块 fillRect"：结果正确但
+ * 粗粒度大面积会爆（800×600 在 bs=4 下每帧 3 万次 fillRect，拖动直接掉帧），已放弃。
+ */
 export function drawBlocked(
   ctx: CanvasRenderingContext2D,
   source: CanvasImageSource,
@@ -13,19 +22,26 @@ export function drawBlocked(
   scratch: HTMLCanvasElement,
 ): void {
   const bs = Math.max(2, Math.round(level));
-  const sw = Math.max(1, Math.floor(r.w / bs));
-  const sh = Math.max(1, Math.floor(r.h / bs));
-  scratch.width = sw;
-  scratch.height = sh;
+  // 块原点向下取整到 bs 的整数倍 → 所有马赛克图形共享同一网格
+  const x0 = Math.floor(r.x / bs) * bs;
+  const y0 = Math.floor(r.y / bs) * bs;
+  const cols = Math.max(1, Math.ceil((r.x + r.w - x0) / bs));
+  const rows = Math.max(1, Math.ceil((r.y + r.h - y0) / bs));
+  scratch.width = cols;
+  scratch.height = rows;
   const sc = scratch.getContext("2d");
   if (!sc) return;
   sc.imageSmoothingEnabled = true;
-  sc.clearRect(0, 0, sw, sh);
-  sc.drawImage(source, r.x, r.y, r.w, r.h, 0, 0, sw, sh);
-
+  sc.imageSmoothingQuality = "high";
+  sc.clearRect(0, 0, cols, rows);
+  // 取样矩形跨到整块边界：每个缩略像素正好等于一个 bs×bs 块的平均色
+  sc.drawImage(source, x0, y0, cols * bs, rows * bs, 0, 0, cols, rows);
   ctx.save();
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(scratch, 0, 0, sw, sh, r.x, r.y, r.w, r.h);
+  ctx.beginPath();
+  ctx.rect(r.x, r.y, r.w, r.h); // 只保留形状范围内，超出整块的部分裁掉
+  ctx.clip();
+  ctx.imageSmoothingEnabled = false; // 最近邻：块边界硬、不糊
+  ctx.drawImage(scratch, 0, 0, cols, rows, x0, y0, cols * bs, rows * bs);
   ctx.restore();
 }
 

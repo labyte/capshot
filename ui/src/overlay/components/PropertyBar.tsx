@@ -14,7 +14,7 @@ import {
 import type { OverlayController } from "../engine/controller";
 import type { ChromeBag } from "./chrome";
 import { FONT_FAMILIES, FONT_SIZES, PALETTE, sizeDotPx } from "../../annotate/model";
-import { IconBlur, IconEllipse, IconMosaic, IconRect } from "../../shared/icons";
+import { IconEllipse, IconRect } from "../../shared/icons";
 
 // 圆点预览直径统一走 model.ts 的 sizeDotPx —— 与箭头/画笔光标的中心圆同一公式，
 // 两处永远同径（用户要求）。橡皮/马赛克用各自的 per 把 80 量级压回 20 以内。
@@ -276,9 +276,9 @@ export default function PropertyBar({
           </>
         )}
 
-        {/* 马赛克四组（对齐参照图，无颜色板）：①线条模式（笔刷打码，滚轮调粗细）
-            ②填充模式（矩形框选）—— ①②互斥；③马赛克/模糊样式 —— **一个按钮**，图标即当前样式、再点切换，
-            不再是文字 chip；④大小滑块 + 数值读数 */}
+        {/* 马赛克三组（无颜色板）：①线条模式（笔刷打码，滚轮调粗细）
+            ②填充模式（矩形框选）—— ①②互斥；③粒度滑块 + 数值读数。
+            原③「马赛克 ⇄ 模糊」切换已按需求**移除**（只保留像素化一种效果）。 */}
         {t === "mosaic" && (
           <>
             <button
@@ -298,30 +298,15 @@ export default function PropertyBar({
               <span />
             </button>
             <span className="snip-sep" />
-            {/* 打码样式：**一个按钮**，图标就是当前样式，再点一下在马赛克⇄模糊之间切换
-                （用户要求，也少一个元素）。图标本身吃 mosaicLevel ——
-                拖粒度时格子粗细 / 波纹起伏当场跟着变，所以不加 .on 高亮。 */}
-            <button
-              className="snip-btn"
-              title={`打码样式：${p.mosaicStyle === "pixel" ? "马赛克（像素方块化）" : "模糊（柔化）"}（点击切换）`}
-              onClick={() =>
-                ctrl.setProps({ mosaicStyle: p.mosaicStyle === "pixel" ? "blur" : "pixel" })
-              }
-            >
-              {p.mosaicStyle === "pixel" ? (
-                <IconMosaic level={p.mosaicLevel} />
-              ) : (
-                <IconBlur level={p.mosaicLevel} />
-              )}
-            </button>
+            {/* 粒度：step 1（原来 2 一档，粗得没法精调） */}
             <input
               className="snip-range"
               type="range"
               min={2}
               max={40}
-              step={2}
+              step={1}
               value={p.mosaicLevel}
-              title="大小（像素粒度 / 模糊半径）"
+              title="粒度（马赛克块边长 px）"
               onWheel={sizeWheel}
               onChange={(e) => ctrl.setProps({ mosaicLevel: Number(e.target.value) })}
             />
