@@ -20,17 +20,7 @@ export function layoutChrome(ctrl: OverlayController, refs: ChromeRefs) {
   });
 
   // --- 读数标签 ---
-  const pos = i.loupeVisible && i.virtualPointer && i.pointer ? toCss(i.pointer) : null;
-  if (refs.posLabel) {
-    if (pos && i.virtualPointer) {
-      refs.posLabel.textContent = `${i.virtualPointer.x}, ${i.virtualPointer.y}`;
-      refs.posLabel.style.left = px(pos.left + 14);
-      refs.posLabel.style.top = px(pos.top - 26);
-      refs.posLabel.style.display = "block";
-    } else {
-      refs.posLabel.style.display = "none";
-    }
-  }
+  // 坐标浮标已删（放大镜面板内已有坐标，二者显示条件本就一致）
   if (refs.sizeLabel) {
     const r = i.sel;
     if (r && (i.phase === "drawing" || i.phase === "adjusting")) {

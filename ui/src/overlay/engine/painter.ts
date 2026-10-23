@@ -33,6 +33,30 @@ export interface PaintInput {
   toolCursor: { x: number; y: number; r: number; kind: "ring" | "dashDot"; color?: string } | null;
 }
 
+/**
+ * **任何背景都读得出来的细框**：先铺一圈白晕，再画 1px 主色芯。
+ * 取色阶段的悬停框原来是 3px 实心蓝单线——压在浅色窗口上勉强、压在蓝/紫内容上直接消失
+ * （两张参考图一张是深色缩略图、一张是白底，两种都要成立）。
+ * 现在芯只有 1 物理 px（150% 屏给 2px 才不致于看不见），外面那圈白晕负责把芯从背景里剥出来：
+ * 白底→白晕隐形但蓝芯清楚；黑底→两者都亮；蓝底→白晕把它隔开。
+ */
+function contrastRect(
+  ctx: CanvasRenderingContext2D,
+  r: Rect,
+  accent: string,
+  scale: number,
+): void {
+  const core = Math.max(1, Math.round(scale));
+  ctx.save();
+  ctx.lineWidth = core + 2;
+  ctx.strokeStyle = "rgba(255,255,255,0.8)";
+  ctx.strokeRect(r.x, r.y, r.w, r.h);
+  ctx.lineWidth = core;
+  ctx.strokeStyle = accent;
+  ctx.strokeRect(r.x, r.y, r.w, r.h);
+  ctx.restore();
+}
+
 export function paint(
   ctx: CanvasRenderingContext2D,
   out: { w: number; h: number },
@@ -42,10 +66,7 @@ export function paint(
   ctx.drawImage(i.frame, 0, 0);
 
   if (i.phase === "picking" && i.hover) {
-    ctx.strokeStyle = i.accent;
-    ctx.lineWidth = Math.max(2, i.handleSize / 3);
-    const r = i.hover;
-    ctx.strokeRect(r.x, r.y, r.w, r.h);
+    contrastRect(ctx, i.hover, i.accent, i.deps.scale);
     return;
   }
 
@@ -66,9 +87,8 @@ export function paint(
   ctx.fillRect(0, y, x, h);
   ctx.fillRect(x + w, y, out.w - x - w, h);
 
-  ctx.strokeStyle = i.accent;
-  ctx.lineWidth = Math.max(1, i.handleSize / 6);
-  ctx.strokeRect(x, y, w, h);
+  // 选区定稿后的边框：与取色阶段的悬停框同一画法（同一根线的两个阶段，粗细不该变）
+  contrastRect(ctx, i.sel, i.accent, i.deps.scale);
 
   /* 图形的虚线包围盒：选中态实色，悬停态压淡一档并细一点。
      两者同一套画法 —— 悬停只是"还没点下去的选中"，不该另发明一种视觉语言。 */
