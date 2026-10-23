@@ -1,0 +1,17 @@
+{
+  "name": "capshot",
+  "private": true,
+  "version": "0.1.13",
+  "description": "CapsShot —— Tauri v2 截图工具（Rust workspace + ui/ 前端）",
+  "scripts": {
+    "tauri": "tauri",
+    "app:dev": "tauri dev",
+    "app:build": "tauri build --no-bundle",
+    "ui:dev": "npm --prefix ui run dev",
+    "ui:build": "npm --prefix ui run build",
+    "ui:typecheck": "npm --prefix ui run typecheck"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.4"
+  }
+}

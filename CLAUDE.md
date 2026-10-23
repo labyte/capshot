@@ -32,6 +32,9 @@ Tauri v2 截图工具（对齐 Snipaste 交互），Rust workspace + Vite/React 
 ## 常用命令
 
 ```bash
+npm run tauri dev             # 一条命令起 vite + debug 应用（**必须在仓库根目录跑**，见下）
+npm run tauri build           # 走 CLI 打包（CI 不用它，发布仍走 cargo + custom-protocol）
+
 cd ui && npm run dev          # vite dev server :1420（tauri debug 构建连它）
 cd ui && npm run build        # 产出 ui/dist（多页，漏页会白屏）
 cd ui && npm run typecheck
@@ -43,6 +46,27 @@ cargo test --workspace
 - 单实例：重复启动静默退出；先 `taskkill //IM capshot.exe //F`。
 - 浏览器调试截图层：vite 跑着时开 `http://localhost:1420/overlay.html?mock`
   （合成帧，交互链路完整可跑，生产构建自动剔除）。
+
+### tauri CLI 的接法（为什么必须从根目录跑）
+
+本项目是**非标准布局**：Tauri 的 crate 在 `apps/desktop`（不是 `src-tauri/`），前端在 `ui/`。
+所以 `npm run tauri dev` 有四个硬条件，缺一个就起不来：
+
+1. **CLI 只装在根 `package.json`** 的 devDependencies 里，`ui/` 不装第二份。
+2. **必须在仓库根目录执行**：CLI 没有 `--cwd` 参数，它要求在当前目录**或其任一子目录**里
+   找到 `tauri.conf.json`。从 `ui/` 跑会直接 panic
+   `Couldn't recognize the current folder as a Tauri project`；从根目录能扫到
+   `apps/desktop/tauri.conf.json` ✓。
+3. **`beforeDevCommand` / `beforeBuildCommand` 写成 `npm --prefix ui run dev|build`**：
+   显式指到 `ui/`，不受 CLI 的工作目录影响；而且根 `package.json` 里**不要放 `dev` 脚本**，
+   否则旧的 `npm run dev` 形式会自己调自己。
+4. **Windows 仍要 `RC` 环境变量**指向 SDK 的 `x64/rc.exe`（CLI 内部照样跑 cargo，
+   tauri-build 嵌资源要 rc.exe）—— 与手工 `cargo build` 是同一个坑。
+
+`tauri dev` 编的是**不带 `custom-protocol`** 的 debug 二进制，运行时连 `http://localhost:1420`，
+所以 vite 必须在（CLI 的 `beforeDevCommand` 会自己起，端口被占就报 `Port 1420 is already in use`——
+多半是上次遗留的 vite 没退干净）。**发布产物不走 CLI**：`release.yml` 用的是
+`npm run build` + `cargo build --release -p desktop --features custom-protocol`。
 
 ## 测试包目录 `capshot-win-x64/`
 

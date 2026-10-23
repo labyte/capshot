@@ -389,6 +389,12 @@ cmd / PowerShell 里运行：
 （`os error 5 拒绝访问`），而 `cargo` 的退出码会被管道吞掉，看起来像"编好了"——
 先 `taskkill //IM capshot.exe //F`，再核对 `target/debug/capshot.exe` 的时间戳有没有变。
 
+**最省事的是 `npm run tauri dev`（必须在仓库根目录跑）**：一条命令自己起 vite + 编一个**不带
+`custom-protocol`** 的 debug 二进制，改前端即时生效、不用每次重编 Rust。四个硬条件（CLI 只装在根
+`package.json`、为什么必须在根目录跑、`beforeDevCommand` 为什么写成 `npm --prefix ui run dev`、
+Windows 仍要 `RC` 指向 SDK 的 `x64/rc.exe`）见 CLAUDE.md「tauri CLI 的接法」。
+报 `Port 1420 is already in use` = 上次遗留的 vite 没退干净，杀掉占端口的 node 即可。
+
 ■ 已知边界（欢迎反馈）
   - Win10 无 SetIsBorderRequired → WGC 截图可能带黄框（Win11 正常）
   - DRM/部分硬件叠加层窗口截出为黑（系统限制，同类工具一致）
