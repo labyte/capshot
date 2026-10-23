@@ -21,7 +21,7 @@ const S = 32; // 光标画布边长（CSS px），Windows 光标上限
 /** 生成（并缓存）一个以中心为热点的 CSS cursor 值 */
 export function cursorUrl(kind: CursorKind, rPx: number, color: string): string {
   const r = Math.max(1, Math.min(S / 2 - 1, rPx));
-  // cross 的字形尺寸是写死的（15px / 1px），rPx 不参与 → 缓存键也不能带它，
+  // cross 的字形尺寸写死在分支里（22×22、臂宽 3），rPx 不参与 → 缓存键也不能带它，
   // 否则同一个十字会按传进来的半径存好几份
   const key = `${kind}|${kind === "cross" ? "-" : Math.round(r)}|${color}`;
   const hit = CACHE.get(key);
@@ -35,15 +35,15 @@ export function cursorUrl(kind: CursorKind, rPx: number, color: string): string 
   const m = S / 2 + 0.5; // 1px 线压在像素中心，避免抗锯齿糊化
 
   if (kind === "cross") {
-    /* 十字 = **一个闭合的 12 点多边形**（加号形），整体 11×11、臂厚 3：
-       中透明白填充 + 1px 黑描边。
-       为什么不再是"两条线叠白边"：那样白边只剩 0.5px，被抗锯齿吃掉，
-       黑底上整个光标等于不可见（实测）。闭合多边形有真正的填充面积，
-       深底靠白填充、浅底靠黑描边，两头都在。
-       坐标全部落在 .5 上（m=16），1px 描边才会压在像素中心而不糊。 */
-    const c0 = S / 2; // 16：配上 .5 的偏移量后顶点落在像素半格上，1px 描边不糊
-    const L = 5.5; // 半长 → 总 11px
-    const t = 1.5; // 半臂厚 → 臂宽 3px，整体保持纤细
+    /* 十字 = 闭合的 12 点加号多边形（用户定的参数）：
+       半长 11 → 总尺寸 22×22；臂宽 3（半厚 t=1.5）；中心**纯白不透明**；黑描边 0.5px。
+       可见性两头分工：深底靠纯白填充，浅底靠黑描边。
+       为什么不是"两条线叠白边"：那样白边只剩 0.5px 会被抗锯齿吃掉，黑底上等于不可见（实测过）。
+       c0 必须等于热点（文件末尾的 `S/2 S/2`），否则"看着对准了其实没对准"；
+       且 c0 - L 不能小于 0，否则臂会被裁到画布外。 */
+    const c0 = S / 2; // 16：与热点同心；16-11=5 仍在画布内
+    const L = 11; // 半长 → 总 22px
+    const t = 1.5; // 半臂厚 → 臂宽 3px
     const pts: [number, number][] = [
       [-t, -L], [t, -L], [t, -t], [L, -t], [L, t], [t, t],
       [t, L], [-t, L], [-t, t], [-L, t], [-L, -t], [-t, -t],
@@ -56,10 +56,10 @@ export function cursorUrl(kind: CursorKind, rPx: number, color: string): string 
       else x.lineTo(px, py);
     });
     x.closePath(); // 封口
-    x.fillStyle = "rgba(255,255,255,0.5)"; // 中透明
+    x.fillStyle = "#fff"; // 中心纯白
     x.fill();
     x.strokeStyle = "#000";
-    x.lineWidth = 1;
+    x.lineWidth = 0.5;
     x.lineJoin = "miter";
     x.stroke();
   } else if (kind === "dot") {
