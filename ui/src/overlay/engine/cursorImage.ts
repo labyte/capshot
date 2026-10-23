@@ -21,7 +21,9 @@ const S = 32; // 光标画布边长（CSS px），Windows 光标上限
 /** 生成（并缓存）一个以中心为热点的 CSS cursor 值 */
 export function cursorUrl(kind: CursorKind, rPx: number, color: string): string {
   const r = Math.max(1, Math.min(S / 2 - 1, rPx));
-  const key = `${kind}|${Math.round(r)}|${color}`;
+  // cross 的字形尺寸是写死的（15px / 1px），rPx 不参与 → 缓存键也不能带它，
+  // 否则同一个十字会按传进来的半径存好几份
+  const key = `${kind}|${kind === "cross" ? "-" : Math.round(r)}|${color}`;
   const hit = CACHE.get(key);
   if (hit) return hit;
 
@@ -33,21 +35,25 @@ export function cursorUrl(kind: CursorKind, rPx: number, color: string): string 
   const m = S / 2 + 0.5; // 1px 线压在像素中心，避免抗锯齿糊化
 
   if (kind === "cross") {
-    // 1px 黑线 + 白晕影：深浅底都读得出来（录屏实测 Snipaste 十字 15px / 1px）
-    const arm = Math.max(5, Math.min(10, rPx));
-    for (const [col, w] of [
-      ["rgba(255,255,255,0.85)", 3],
-      ["#000", 1],
-    ] as const) {
-      x.strokeStyle = col;
-      x.lineWidth = w;
+    /* 简单十字：一条 1px 黑线，横竖各 15px（录屏实测 Snipaste 就是这个尺寸）。
+       下面只垫 2px 白，等于黑线两侧各 0.5px 发丝边 —— 纯粹为了深底上不至于完全看不见；
+       原来垫 3px 白晕，视觉上糊成一团粗十字，不像一个干净的加号。 */
+    const arm = 7;
+    const cross = () => {
       x.beginPath();
       x.moveTo(m - arm, m);
       x.lineTo(m + arm, m);
       x.moveTo(m, m - arm);
       x.lineTo(m, m + arm);
       x.stroke();
-    }
+    };
+    x.lineCap = "butt";
+    x.strokeStyle = "rgba(255,255,255,0.75)";
+    x.lineWidth = 2;
+    cross();
+    x.strokeStyle = "#000";
+    x.lineWidth = 1;
+    cross();
   } else if (kind === "dot") {
     // 记号笔：实心圆，半透明当前色 + 实边（与它涂出来的高亮同观感）
     x.globalAlpha = 0.55;

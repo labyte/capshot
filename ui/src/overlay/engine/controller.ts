@@ -642,12 +642,6 @@ export class OverlayController {
     this.mark();
   }
 
-  /** 自绘细十字的臂长（物理 px）。录屏实测 Snipaste 的十字 15px / 1px，
-   *  比系统 IDC_CROSS（≈19px、2px 黑线）小且细 */
-  private crossArm(): number {
-    return Math.max(5, Math.round(6 * this.scale));
-  }
-
   /**
    * 光标的**唯一决策点**：一次返回「系统光标 css」+「要自绘什么」，二者严格互斥。
    * `updateCursor()` 与 `draw()` 都只读它 —— 之前两边各判一遍，条件稍不同步就出现
@@ -684,7 +678,8 @@ export class OverlayController {
        只要系统里始终有一个真实光标，就不存在"该隐藏却没隐藏"这个状态。
        超过光标图上限（32px）的笔刷 —— 橡皮 4–80、马赛克 8–80 —— 仍由画布补一圈
        尺寸预览，光标本身给细十字做精确定位。 */
-    const cross = cursorUrl("cross", this.crossArm() / this.scale, "");
+    // 十字的尺寸写死在 cursorImage（15px / 1px，照录屏实测），这里不再传半径
+    const cross = cursorUrl("cross", 0, "");
     const tc = this.toolCursor();
     if (!tc) return { css: cross, drawn: null };
     if (tc.kind === "ring" || tc.kind === "dashDot")
