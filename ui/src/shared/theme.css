@@ -647,7 +647,9 @@ body.settings code {
   background: rgba(0, 0, 0, 0.55);
   border: 1px dashed var(--snip-accent);
   outline: none;
-  padding: 2px 5px;
+  /* 左内边距给 0：输入框左边缘落在点击点，文字也要从框左边起排，
+     否则插入符会比成品文字右移 6px（5 padding + 1 border），"打字位置"与"成品位置"对不上 */
+  padding: 2px 5px 2px 0;
   min-width: 140px;
   /* 全局 user-select:none 会渗进输入框：打字没事，但框内选不了字 */
   user-select: text;

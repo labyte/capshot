@@ -8,7 +8,7 @@ import { paint, paintCursor, type PaintInput } from "./painter";
 import { cursorUrl, MAX_CURSOR_RADIUS } from "./cursorImage";
 import { PixelReader } from "./pixelReader";
 import { makeScratch } from "../../annotate/mosaic";
-import { drawShapes, measureTextWidth } from "../../annotate/render";
+import { drawShapes } from "../../annotate/render";
 import {
   applyShapeHandle,
   canEditShape,
@@ -680,15 +680,19 @@ export class OverlayController {
        尺寸预览，光标本身给细十字做精确定位。 */
     // 十字的尺寸写死在 cursorImage（15px / 1px，照录屏实测），这里不再传半径
     const cross = cursorUrl("cross", 0, "");
+    const blank = cursorUrl("blank", 0, "");
     const tc = this.toolCursor();
     if (!tc) return { css: cross, drawn: null };
+    /* 圈由画布画的三种情况（橡皮圆头 / 马赛克线条 / 超大记号笔）：
+       系统光标给**全透明图**，不给十字 —— 用户报"马赛克和橡皮多了一个十字架"。
+       也不能用 `cursor: none`（WebView2 切回 none 不生效会留残影），所以要一张看不见的图占位。 */
     if (tc.kind === "ring" || tc.kind === "dashDot")
-      return { css: cross, drawn: { kind: tc.kind, r: tc.r } };
+      return { css: blank, drawn: { kind: tc.kind, r: tc.r } };
     if (tc.kind === "dot") {
       const rCss = tc.r / this.scale;
-      // 记号笔线宽 16 时半径 32 CSS px，超过光标图上限 → 改走"十字光标 + 画布补圈"
+      // 记号笔线宽 16 时半径 32 CSS px，超过光标图上限 → 改走"透明光标 + 画布补圈"
       if (rCss > MAX_CURSOR_RADIUS)
-        return { css: cross, drawn: { kind: "ring", r: tc.r, color: s.props.color } };
+        return { css: blank, drawn: { kind: "ring", r: tc.r, color: s.props.color } };
       return { css: cursorUrl("dot", rCss, s.props.color), drawn: null };
     }
     // dotTicks：线宽 16 时半径 8 CSS px，仍在 15 以内，直接走光标图
@@ -1592,14 +1596,8 @@ export class OverlayController {
       const sc = this.scale;
       const p = this.state.props;
       this.pushUndo();
-      /* 输入框是"水平居中于点击点"的（见 TextInput 的 translateX(-50%)），
-         所以成品文字也要以点击点为中心：at 存的是**文字左沿**，故左移半个文字宽。
-         量宽用的是与绘制端同一套字体串，不会打字一个位、成品另一个位。 */
-      const textW = measureTextWidth(text, p.fontPx * sc, {
-        bold: p.textBold,
-        italic: p.textItalic,
-        family: p.textFamily,
-      });
+      /* 输入框左边缘就落在点击点、文字从框左边起排（见 TextInput + .snip-textinput 的
+         padding-left:0），所以成品直接以点击点为文字左沿，不需要任何补偿。 */
       this.store.set({
         shapes: [
           ...this.state.shapes,
@@ -1608,7 +1606,7 @@ export class OverlayController {
             kind: "text",
             color: p.color,
             width: 0,
-            at: { x: at.x - textW / 2, y: at.y },
+            at: { ...at },
             text,
             fontPx: p.fontPx * sc,
             bg: p.textBg,

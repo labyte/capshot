@@ -10,7 +10,7 @@
 //! 半径 32px、橡皮 4–80、马赛克 8–80）仍由画布画圈当尺寸预览，
 //! 光标本身只给一个精确定位的细十字。
 
-export type CursorKind = "cross" | "dotTicks" | "dot";
+export type CursorKind = "cross" | "dotTicks" | "dot" | "blank";
 
 /** 光标图能容纳的最大半径（CSS px）。超过这个值就改走"十字光标 + 画布补圈"。 */
 export const MAX_CURSOR_RADIUS = 15;
@@ -18,12 +18,25 @@ export const MAX_CURSOR_RADIUS = 15;
 const CACHE = new Map<string, string>();
 const S = 32; // 光标画布边长（CSS px），Windows 光标上限
 
+/** 全透明 32×32 光标图（懒建一次）：给"圈由画布画"的工具当占位光标用 */
+let BLANK_URL: string | null = null;
+function blankUrl(): string {
+  if (!BLANK_URL) {
+    const c = document.createElement("canvas");
+    c.width = S;
+    c.height = S;
+    BLANK_URL = c.toDataURL(); // 什么都没画 → 全透明
+  }
+  return `url(${BLANK_URL}) ${S / 2} ${S / 2}, none`;
+}
+
 /** 生成（并缓存）一个以中心为热点的 CSS cursor 值 */
 export function cursorUrl(kind: CursorKind, rPx: number, color: string): string {
   const r = Math.max(1, Math.min(S / 2 - 1, rPx));
-  // cross 的字形尺寸写死在分支里（22×22、臂宽 3），rPx 不参与 → 缓存键也不能带它，
-  // 否则同一个十字会按传进来的半径存好几份
-  const key = `${kind}|${kind === "cross" ? "-" : Math.round(r)}|${color}`;
+  // cross / blank 的字形尺寸与半径无关（cross 写死在分支里，blank 干脆不画），
+  // 缓存键也不能带 rPx，否则同一个形状会按传进来的半径存好几份
+  const keyed = kind === "cross" || kind === "blank" ? "-" : String(Math.round(r));
+  const key = `${kind}|${keyed}|${color}`;
   const hit = CACHE.get(key);
   if (hit) return hit;
 
@@ -34,16 +47,23 @@ export function cursorUrl(kind: CursorKind, rPx: number, color: string): string 
   if (!x) return "none";
   const m = S / 2 + 0.5; // 1px 线压在像素中心，避免抗锯齿糊化
 
+  if (kind === "blank") {
+    /* 全透明光标：给"笔刷圈由画布画"的工具（橡皮圆头 / 马赛克线条）用。
+       为什么不直接写 `cursor: none`：WebView2 从具名光标（如 nwse-resize）切回 none
+       不生效，会留下上一个系统光标 → 双光标。给一张透明图，系统里始终有个真实光标，
+       但看不见，画布上的圈就是唯一可见的光标。 */
+    return blankUrl();
+  }
   if (kind === "cross") {
     /* 十字 = 闭合的 12 点加号多边形（用户定的参数）：
-       半长 11 → 总尺寸 22×22；臂宽 2（半厚 t=1.0）；中心纯白不透明；黑描边 0.5px。
-       **白芯实测 1.5px**：臂宽 2 减去 0.5px 描边向内压进的两侧各 0.25 → 2 - 0.5 = 1.5。
+       半长 10 → 总尺寸 20×20；臂宽 2（半厚 t=1.0）；中心纯白不透明；黑描边 0.5px。
+       **白芯 1.5px**：臂宽 2 减去 0.5px 描边向内压进的两侧各 0.25 → 2 - 0.5 = 1.5。
        可见性两头分工：深底靠纯白填充，浅底靠黑描边。
        为什么不是"两条线叠白边"：那样白边只剩 0.5px 会被抗锯齿吃掉，黑底上等于不可见（实测过）。
        c0 必须等于热点（文件末尾的 `S/2 S/2`），否则"看着对准了其实没对准"；
        且 c0 - L 不能小于 0，否则臂会被裁到画布外。 */
-    const c0 = S / 2; // 16：与热点同心；16-11=5 仍在画布内
-    const L = 11; // 半长 → 总 22px
+    const c0 = S / 2; // 16：与热点同心；16-10=6 仍在画布内
+    const L = 10; // 半长 → 总 20px
     const t = 1; // 半臂厚 → 臂宽 2px，白芯 1.5px
     const pts: [number, number][] = [
       [-t, -L], [t, -L], [t, -t], [L, -t], [L, t], [t, t],
