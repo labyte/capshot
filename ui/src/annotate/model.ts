@@ -263,10 +263,10 @@ export function canEditShape(s: Shape): boolean {
     case "arrow":
     case "marker":
       return true;
-    // 矩形/椭圆 = 四角 + 四边中点共 8 向句柄；记号笔的矩形高亮框不算
+    // 矩形/椭圆 = 四角 + 四边中点共 8 向句柄；**记号笔矩形模式也算**（画完带 8 向句柄可调）
     case "rect":
     case "ellipse":
-      return !s.marker;
+      return true;
     default:
       return false;
   }
@@ -292,7 +292,7 @@ export function shapeHandles(s: Shape): ShapeHandle[] {
       ];
     case "rect":
     case "ellipse":
-      return s.marker ? [] : handlePoints(s.r).map((h) => ({ k: h.k, x: h.x, y: h.y }));
+      return handlePoints(s.r).map((h) => ({ k: h.k, x: h.x, y: h.y }));
     default:
       return [];
   }
