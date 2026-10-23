@@ -75,6 +75,25 @@ cargo test --workspace
 > 一眼判别法：`grep -a -o 'TextInput-[A-Za-z0-9_-]*\.js' target/debug/capshot.exe`
 > 有输出 = 内嵌版（独立可跑）；**空 = dev 版（必须配 vite）**。
 
+## 推送 GitHub 走 VPN 代理
+
+推送反复出现 `Recv failure: Connection was reset` / `Failed to connect to github.com port 443` 时，
+走 VPN 客户端的 HTTP 代理（本机全流量接管端口 **7890**）：
+
+```bash
+git config http.https://github.com.proxy http://127.0.0.1:7890   # 只影响 github 这一个远端
+# …push…
+git config --unset http.https://github.com.proxy                 # 用完撤掉
+```
+
+**两条必须知道的坑**（都实测过）：
+
+1. **先确认 7890 在听再设**：`netstat -ano | grep "127.0.0.1:7890.*LISTENING"`。
+   客户端跑的是 **TUN 全流量接管**时，这个端口往往不存在——此时设了代理等于把推送弄瘫
+   （实测：端口没人听时 `git ls-remote` 直接失败，而**直连是通的**）。
+   TUN 模式下什么都不用配，直连即可。
+2. **别写 `--global`**：per-URL 规则只作用于 `github.com`，全局设了会影响其它内网 git。
+
 ## 测试包目录 `capshot-win-x64/`
 
 gitignored 的本地打包产物目录（exe + WebView2Loader.dll + probe.exe + README-test.md），
