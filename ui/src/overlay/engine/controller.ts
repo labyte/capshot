@@ -24,7 +24,6 @@ import { parse as parseAnnotation } from "../../annotate/serialize";
 import {
   clamp,
   CURSOR_FOR_HANDLE,
-  handlePoints,
   moveRect,
   norm,
   rectEq,
@@ -569,13 +568,35 @@ export class OverlayController {
     this.mark();
   }
 
+  /**
+   * 选区边框命中：**整条边框都是缩放手柄**，不只是那 8 个点。
+   * 原来只测 8 点，移到边框中段（不在四角也不在边中点）完全没反馈 ——
+   * 用户报的"移到选区边框上光标不切换"就是这个；角落优先、其次边，容差 = 手柄边长。
+   */
   private hitHandle(p: Point): Handle | null {
     const s = this.state.sel;
     if (!s || this.state.phase !== "adjusting") return null;
     const tol = this.handleSize;
-    for (const h of handlePoints(s)) {
-      if (Math.abs(h.x - p.x) <= tol && Math.abs(h.y - p.y) <= tol) return h.k;
-    }
+    // 外扩 tol 之外不必再看（含"选区太小、上下边重叠"的退化情况）
+    if (
+      p.x < s.x - tol ||
+      p.x > s.x + s.w + tol ||
+      p.y < s.y - tol ||
+      p.y > s.y + s.h + tol
+    )
+      return null;
+    const nearW = Math.abs(p.x - s.x) <= tol;
+    const nearE = Math.abs(p.x - (s.x + s.w)) <= tol;
+    const nearN = Math.abs(p.y - s.y) <= tol;
+    const nearS = Math.abs(p.y - (s.y + s.h)) <= tol;
+    if (nearN && nearW) return "nw";
+    if (nearN && nearE) return "ne";
+    if (nearS && nearW) return "sw";
+    if (nearS && nearE) return "se";
+    if (nearW) return "w";
+    if (nearE) return "e";
+    if (nearN) return "n";
+    if (nearS) return "s";
     return null;
   }
 
@@ -651,9 +672,10 @@ export class OverlayController {
     if (a?.mode === "move" || a?.mode === "shape-move") return { css: "move", drawn: null };
     // 压在「刚画完那支」的句柄上：只给选择光标，绘制光标让位
     if (this.hotEdit) return { css: this.editCursor(this.hotEdit), drawn: null };
-    // 选区手柄只在没有工具激活时抢光标（有工具时它常压在暗区，见用户定的归属规则）
-    if (this.hotHandle && !s.tool)
-      return { css: CURSOR_FOR_HANDLE[this.hotHandle], drawn: null };
+    /* 压在选区边框上 → 方向缩放光标，**与有没有工具无关**：整条边框都是缩放手柄，
+       光标必须诚实反映这一点（上一条我加了 !s.tool 限制，导致"只有按下才切换"）。
+       绘制光标此时让位，不会出现两个光标同屏。 */
+    if (this.hotHandle) return { css: CURSOR_FOR_HANDLE[this.hotHandle], drawn: null };
     if (s.tool === "text" || s.pendingTextAt) return { css: "text", drawn: null };
     if (!s.tool && s.phase === "adjusting" && (this.hoverShapeId !== null || this.inSel(p)))
       return { css: "move", drawn: null };
