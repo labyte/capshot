@@ -780,7 +780,23 @@ export class OverlayController {
       this.mark();
       return;
     }
-    // 落点不在句柄上 = 这一支就此定稿（点别处、端点消失后不可再改）
+    /* 带活句柄的图形，按在**本体**上 = 整体拖动（用户要求"有手柄的图形都可拖动"）。
+       两条前提：① 不能压在选区手柄上（那个更细，且"随时可调选区"是先定的规则）；
+       ② 必须在 releaseEditHandles 之前判，否则"没落在句柄上"就先取消了可编辑态，
+       这一支再也拖不动了。工具开着时尤其关键——否则按在身上等于起笔画下一支。 */
+    const ed = this.editableShape();
+    if (ed && !this.hitHandle(p) && hitShape(ed, p, this.scale)) {
+      this.pushUndo();
+      this.anchor = {
+        mode: "shape-move",
+        start: p,
+        id: ed.id,
+        origin: JSON.parse(JSON.stringify(ed)) as Shape,
+      };
+      this.mark();
+      return;
+    }
+    // 既不在句柄也不在这支图形本体上 = 这一支就此定稿（点别处、端点消失后不可再改）
     this.releaseEditHandles();
 
     if (s.phase === "adjusting" && !s.tool) {
