@@ -6,10 +6,14 @@
 //! 只要系统里始终存在一个真实光标（哪怕是透明的），就不存在"该隐藏却没隐藏"这个状态。
 //!
 //! 尺寸一律用 **CSS px**（光标图不受 canvas 的物理像素换算影响），最大 32；
-//! 超过 32 的笔刷（橡皮 4–80、马赛克 8–80）仍由画布画圈当尺寸预览，
+//! 超过 `MAX_CURSOR_RADIUS`（15 CSS px = 30px 直径）的笔刷（记号笔线宽 16 时
+//! 半径 32px、橡皮 4–80、马赛克 8–80）仍由画布画圈当尺寸预览，
 //! 光标本身只给一个精确定位的细十字。
 
 export type CursorKind = "cross" | "dotTicks" | "dot";
+
+/** 光标图能容纳的最大半径（CSS px）。超过这个值就改走"十字光标 + 画布补圈"。 */
+export const MAX_CURSOR_RADIUS = 15;
 
 const CACHE = new Map<string, string>();
 const S = 32; // 光标画布边长（CSS px），Windows 光标上限

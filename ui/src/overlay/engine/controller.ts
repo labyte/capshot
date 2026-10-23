@@ -5,7 +5,7 @@ import { invoke, u8ToB64 } from "../../shared/ipc";
 import { getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
 import { createStore } from "./store";
 import { paint, paintCursor, type PaintInput } from "./painter";
-import { cursorUrl } from "./cursorImage";
+import { cursorUrl, MAX_CURSOR_RADIUS } from "./cursorImage";
 import { PixelReader } from "./pixelReader";
 import { makeScratch } from "../../annotate/mosaic";
 import { drawShapes } from "../../annotate/render";
@@ -636,8 +636,8 @@ export class OverlayController {
    */
   private cursorPlan(): {
     css: string;
-    /** 只有超过光标图尺寸的笔刷（橡皮 / 马赛克）才需要画布补一圈尺寸预览 */
-    drawn: { kind: "ring" | "dashDot"; r: number } | null;
+    /** 只有超过光标图尺寸的笔刷（橡皮 / 马赛克 / 大号记号笔）才需要画布补一圈尺寸预览 */
+    drawn: { kind: "ring" | "dashDot"; r: number; color?: string } | null;
   } {
     const s = this.state;
     const p = this.pointer;
@@ -665,8 +665,14 @@ export class OverlayController {
     if (!tc) return { css: cross, drawn: null };
     if (tc.kind === "ring" || tc.kind === "dashDot")
       return { css: cross, drawn: { kind: tc.kind, r: tc.r } };
-    if (tc.kind === "dot")
-      return { css: cursorUrl("dot", tc.r / this.scale, s.props.color), drawn: null };
+    if (tc.kind === "dot") {
+      const rCss = tc.r / this.scale;
+      // 记号笔线宽 16 时半径 32 CSS px，超过光标图上限 → 改走"十字光标 + 画布补圈"
+      if (rCss > MAX_CURSOR_RADIUS)
+        return { css: cross, drawn: { kind: "ring", r: tc.r, color: s.props.color } };
+      return { css: cursorUrl("dot", rCss, s.props.color), drawn: null };
+    }
+    // dotTicks：线宽 16 时半径 8 CSS px，仍在 15 以内，直接走光标图
     return { css: cursorUrl("dotTicks", tc.r / this.scale, s.props.color), drawn: null };
   }
 

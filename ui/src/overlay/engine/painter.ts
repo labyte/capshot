@@ -30,7 +30,7 @@ export interface PaintInput {
    * ring = 笔刷圈（橡皮圆头 / 马赛克线条 / 记号笔）；
    * dotTicks = 圆点 + 四向短线（箭头），点用**当前标注色**、直径随线宽变。
    */
-  toolCursor: { x: number; y: number; r: number; kind: "ring" | "dashDot" } | null;
+  toolCursor: { x: number; y: number; r: number; kind: "ring" | "dashDot"; color?: string } | null;
 }
 
 export function paint(
@@ -136,7 +136,7 @@ export function paint(
  */
 export function paintCursor(ctx: CanvasRenderingContext2D, i: PaintInput): void {
   if (!i.toolCursor) return;
-  const { x, y, r, kind } = i.toolCursor;
+  const { x, y, r, kind, color } = i.toolCursor;
   if (kind === "dashDot") {
     /* 马赛克：实心 + 虚线边（用户指定）。打码不涉及颜色 → 中性灰实心 + 白晕深虚线双描边。 */
     const rr = Math.max(4, r);
@@ -153,6 +153,23 @@ export function paintCursor(ctx: CanvasRenderingContext2D, i: PaintInput): void 
     ctx.strokeStyle = "rgba(0,0,0,0.7)";
     ctx.stroke();
     ctx.restore();
+    return;
+  }
+  if (kind === "ring" && color) {
+    /* 记号笔超大笔刷（线宽 16 → 半径 32 CSS px，超过光标图上限）：
+       用当前色画半透明实心圆 + 实边，与它涂出来的高亮同观感。 */
+    ctx.save();
+    ctx.globalAlpha = 0.45;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = color;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.stroke();
     return;
   }
   /* 橡皮圆头：录屏实测 Snipaste 的环是半透明白填充（环内比环外亮）+ 深色描边，
