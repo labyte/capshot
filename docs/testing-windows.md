@@ -250,7 +250,12 @@ cmd / PowerShell 里运行：
 **光标**：手绘模式下是**实心圆，大小跟线宽** —— 记号笔实际涂出来的高亮宽 = 线宽×4
 （见 `render.ts` 的 marker 分支），所以光标半径取 `width×2×scale`，圈多大涂出来就多宽，
 滚轮一改当场跟着变（用户指定；录屏 t=184–197 量到的曾是固定 ~15px 环，按用户要求改）。
-矩形标记模式下回到十字。
+矩形标记模式下回到透明光标占位（画布不画圈），且**同样给 8 向句柄**（见下）。
+
+**矩形标记模式画完带 8 向句柄**（用户要求）：记号笔的矩形高亮框画完也给四角 + 四边中点，
+拖哪个动哪条边，点别处同样定稿。它本来就是 `kind:"rect"` + `marker:true`，
+所以 `shapeHandles` / `applyShapeHandle` / `resizeRect` 一整套算法**直接复用普通矩形**，
+只是 `canEditShape` 与 `shapeHandles` 原先都把 `s.marker` 排除在外，现已放开。
 
 ### 7. 马赛克
 
@@ -295,6 +300,11 @@ cmd / PowerShell 里运行：
 同时把 `.snip-textinput input` 的左内边距给 0（`padding: 2px 5px 2px 0`）——
 否则插入符会比成品文字右移 6px（5 padding + 1 border），"打字位置"与"成品位置"对不上。
 最终一条线对齐：**I 梁光标热点 = 框左边 = 文字起点 = 成品文字左沿**。
+
+**垂直方向也要在同一条横线上**（用户追加要求）：输入框加 `translateY(-50%)`，让它
+**垂直居中于点击点** —— 浏览器把输入框内的文字按内容盒垂直居中，所以
+框中心线 = 文字中线 = 点击那条横线。`commitText` 相应把 `at.y` **上移半个字高**
+（绘制端是 `textBaseline:"top"`，`at.y` 是 em 盒顶），不补偿的话回车后文字会往下跳半行。
 
 ### 9. 橡皮擦
 
@@ -384,11 +394,13 @@ cmd / PowerShell 里运行：
 | 50 | 绘图时的光标归属 | 非工具条区域（含选区外暗区）一律显示标注光标，只有 bar 内切系统箭头 | 有工具时 `hotHandle` 不再抢光标（`updateCursor` 与 `draw()` 的 `grabHandle` 同步加 `!s.tool` 条件）；bar 内控件已是 `cursor: default` |
 | 52 | 光标决策收口 | 多处出现"缩放光标与绘制光标同屏" | 根因是"要不要自绘光标"在 `updateCursor()` 与 `draw()` 各判一遍。新增唯一决策点 `cursorPlan()` 一次返回 {系统css, 自绘kind+r}，二者严格互斥；两边都只读它。顺带删掉 `drawCross`/`grabHandle` 两个中间状态 |
 | 62 | 橡皮/马赛克多一个十字 | 圈由画布画的三档不该再有十字 | 新增 `blank` 光标（全透明 32×32 图）替代 `cross` 占位；不用 `cursor:none`（WebView2 切回不生效会留残影）。超大记号笔那一档同步改走 blank |
+| 64 | 记号笔矩形模式句柄 | 画完也给 8 向句柄、可调整 | `canEditShape` / `shapeHandles` 放开对 `s.marker` 的排除；算法整套复用普通矩形（它就是 `kind:"rect"`+`marker:true`），点别处同样定稿 |
+| 65 | 文本框与光标同一横线 | I 梁、输入框、文字要在同一条横线上（垂直） | 输入框 `translateY(-50%)` 垂直居中于点击点 + `commitText` 上移半个字高（绘制端 `textBaseline:"top"`，不补就会回车后往下跳半行） |
 | 63 | 文本输入对齐 | **框左边缘在点击点**、文字与 I 梁热点同一条线 | 撤掉 translateX(-50%) 与 text-align:center、commitText 不再补偿半宽；`.snip-textinput input` 左内边距归 0。删掉随之失效的 `measureTextWidth`，保留 `textFontCss` 作字体串单一来源 |
 | 58 | 打码样式 | **去除模糊**，只留像素化 | 删掉属性栏的样式切换按钮与 `IconBlur` 导入；`mosaicStyle` 字段 + `drawBlurred()` 保留，历史条目照常渲染 |
 | 59 | 马赛克效果差 | 块要等大、不抖、可拼接 | `drawBlocked` 的块网格按 bs 对齐到整帧原点（`x0=floor(r.x/bs)*bs`），取样矩形跨到整块边界，一次面积平均 + 一次最近邻放大 + clip 到形状。旧法 `floor(r.w/bs)` 放大回去每块宽≠bs，8/9px 混排所以又抖又糊 |
 | 60 | 粒度滑块 | 控件做细、粒度可调得更准 | `.snip-range` 自绘：3px 轨道 + 9px 圆头拇指、宽 84→96；`step` 2→1 |
-| 61 | 文本输入对齐 | 输入框水平居中于点击点 | `TextInput` 外层 `translateX(-50%)` + 框内 `text-align:center`；`commitText` 把 `at.x` 左移半个文字宽。新增 `textFontCss`/`measureTextWidth`（`annotate/render.ts`）让量宽与绘制共用同一字体串 |
+| 61 | 文本输入对齐 | （曾要求：输入框水平居中于点击点） | 曾实现 `translateX(-50%)` + `text-align:center` + 提交补偿半宽；**已被 63 取代**（改回框左边=点击点）。保留下来的只有 `textFontCss` 作字体串单一来源 |
 | 57 | 十字最终形态 | 用户手定：**半长 11（总 22×22）、臂宽 3、中心纯白、黑边 0.5px、闭合** | `cursorImage.ts` 的 cross 分支 = 12 点加号多边形（`L=11`、`t=1.5`、`c0=S/2` 与热点同心）→ `closePath()` 封口 → 填充 `#fff` + `lineWidth 0.5` 黑描边。1:1 像素矩阵实测：黑底是实心白加号（显眼），白底靠灰化的半像素黑边定形（可见）。**上一版"1px 黑线垫 2px 白"在黑底上等于不可见**（0.5px 白边被抗锯齿吃掉），而我当时拿 3 倍放大截图验收、判断错了 —— 教训记在这里 |
 | 56 | 选区边框命中 | 移到边框上就该切缩放光标（不是只有按下才切） | 两个原因：① 上一条我加的 `hotHandle && !s.tool` 让有工具时边框不抢光标 → 只有 pointerdown 走 anchor 分支才切；已去掉该限制。② `hitHandle` 原来只测 8 个点，边框中段根本命中不了；改成**整条边都是命中区**（角落优先→边，容差=手柄边长）。副作用：有工具时点在边框 ±9px 内会调选区而不是画图，光标已如实提示 |
 | 55 | 箭头/画笔光标的中心圆 | 大小以中心圆为准，且直径与工具条圆点一致 | `sizeDotPx(value, per)` 从 PropertyBar 提到 `annotate/model.ts` 作唯一公式；工具条预览点与 `toolCursor()` 的 dotTicks 半径都读它（`r = sizeDotPx(线宽)/2 × scale`）。短线降级为装饰并夹长度，防顶出光标图 |
