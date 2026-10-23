@@ -358,6 +358,7 @@ cmd / PowerShell 里运行：
 | 46 | 马赛克光标 | **实心 + 虚线边** | `toolCursor()` 新增 `dashDot` 分支：中性灰实心 + 白晕/深虚线双描边（打码不涉及颜色），环径仍随笔刷 8–80 实时变 |
 | 50 | 绘图时的光标归属 | 非工具条区域（含选区外暗区）一律显示标注光标，只有 bar 内切系统箭头 | 有工具时 `hotHandle` 不再抢光标（`updateCursor` 与 `draw()` 的 `grabHandle` 同步加 `!s.tool` 条件）；bar 内控件已是 `cursor: default` |
 | 52 | 光标决策收口 | 多处出现"缩放光标与绘制光标同屏" | 根因是"要不要自绘光标"在 `updateCursor()` 与 `draw()` 各判一遍。新增唯一决策点 `cursorPlan()` 一次返回 {系统css, 自绘kind+r}，二者严格互斥；两边都只读它。顺带删掉 `drawCross`/`grabHandle` 两个中间状态 |
+| 54 | 离开句柄后旋转光标残留 | 移开箭头端点后系统缩放光标不消失 | 逐条读调用链没找到「某条路径漏调 updateCursor」的确切分支，所以改成**结构性保证**：`draw()` 每帧用同一个 `cursorPlan()` 重新断言 `style.cursor`（新增 `applyCursor()` 记录已应用值）。自绘光标与系统光标绑在同一次绘制里，任何漏调都会在下一帧被纠正。若仍残留，下一步是改用 CSS `url()` 自定义光标带热点（Snipaste 本身就是 `QCursor(QPixmap,hot)`），彻底消灭「需要隐藏的默认光标」这个状态 |
 | 53 | 记号笔光标大小 | 跟线宽（不是固定 15px） | `toolCursor()` 的 marker 分支返回 `width×2×scale` 半径 = 实际高亮笔迹宽；仍是实心圆 |
 | 51 | 选区外标注 | 在非截图区域也能标注 | `painter` 调 `drawShapes` 的 clip 由 `i.sel` 改 `null`（预览放开裁剪，导出按选区画布天然裁掉）；`shapeAt` 的命中不再要求 `inSel`，外的标注可悬停/点选/拖动 |
 | 49 | 打码样式切换 | 一个按钮：图标即状态，重复点击在马赛克⇄模糊间切换；改粒度时图标同步变 | 合并 `mosaicStyle` 两个互斥按钮为一个；`IconMosaic`/`IconBlur` 新增 `level` 参数（格数 6→2 / 振幅 1→2.8）随粒度实时重绘 | 已改 |

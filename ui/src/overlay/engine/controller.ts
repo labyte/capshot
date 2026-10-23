@@ -414,8 +414,12 @@ export class OverlayController {
   private draw(): void {
     if (!this.frame) return;
     const s = this.state;
-    // 光标层与系统光标同源：cursorPlan() 一次决定，绝不会出现两种光标同屏
+    /* 光标层与系统光标同源：cursorPlan() 一次决定，绝不会出现两种光标同屏。
+       这里还要**每帧重新断言系统光标** —— 离开句柄后旋转光标不消失那类残留，
+       本质是"某一帧画了自绘光标、但 style.cursor 还停在上一帧的系统光标上"。
+       把两者绑在同一次绘制里，任何忘了调 updateCursor 的路径都会在下一帧被纠正。 */
     const plan = this.cursorPlan();
+    this.applyCursor(plan.css);
     const drawn = plan.drawn;
     const editable = this.editableShape();
     if (!this.reader) {
@@ -660,8 +664,14 @@ export class OverlayController {
 
   /** 把决策里的系统光标写到 canvas 上（值没变不写，省一次样式重算） */
   private updateCursor(): void {
-    const css = this.cursorPlan().css;
-    if (this.canvas.style.cursor !== css) this.canvas.style.cursor = css;
+    this.applyCursor(this.cursorPlan().css);
+  }
+
+  private appliedCursor = "";
+  private applyCursor(css: string): void {
+    if (this.appliedCursor === css && this.canvas.style.cursor === css) return;
+    this.canvas.style.cursor = css;
+    this.appliedCursor = css;
   }
 
   /**
