@@ -39,12 +39,23 @@ export default function TextInput({ ctrl }: { ctrl: OverlayController }) {
     255;
 
   return (
-    <div className="snip-textinput" style={{ left: `${left}px`, top: `${top}px`, fontSize: `${fontPx}px` }}>
+    /* 输入框**水平居中于点击点**（translateX(-50%)），文字在框内也居中；
+       提交时 commitText 会把落点左移半个文字宽，两者才对得上。 */
+    <div
+      className="snip-textinput"
+      style={{
+        left: `${left}px`,
+        top: `${top}px`,
+        fontSize: `${fontPx}px`,
+        transform: "translateX(-50%)", // 框的水平中心 = 点击点
+      }}
+    >
       <input
         ref={inputRef}
         placeholder="输入文字，回车确认"
         // 输入期就按当前属性（颜色/粗细/斜体/删除线/字体/字号）渲染，和提交后的图形一致
         style={{
+          textAlign: "center", // 文字在框内居中 → 与"框居中于点击点"叠加后，文字中心就是点击点
           color: col,
           background: lum < 0.5 ? "rgba(255,255,255,0.88)" : "rgba(0,0,0,0.55)",
           fontWeight: s.props.textBold ? 700 : 400,

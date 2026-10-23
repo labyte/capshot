@@ -8,7 +8,7 @@ import { paint, paintCursor, type PaintInput } from "./painter";
 import { cursorUrl, MAX_CURSOR_RADIUS } from "./cursorImage";
 import { PixelReader } from "./pixelReader";
 import { makeScratch } from "../../annotate/mosaic";
-import { drawShapes } from "../../annotate/render";
+import { drawShapes, measureTextWidth } from "../../annotate/render";
 import {
   applyShapeHandle,
   canEditShape,
@@ -1592,6 +1592,14 @@ export class OverlayController {
       const sc = this.scale;
       const p = this.state.props;
       this.pushUndo();
+      /* 输入框是"水平居中于点击点"的（见 TextInput 的 translateX(-50%)），
+         所以成品文字也要以点击点为中心：at 存的是**文字左沿**，故左移半个文字宽。
+         量宽用的是与绘制端同一套字体串，不会打字一个位、成品另一个位。 */
+      const textW = measureTextWidth(text, p.fontPx * sc, {
+        bold: p.textBold,
+        italic: p.textItalic,
+        family: p.textFamily,
+      });
       this.store.set({
         shapes: [
           ...this.state.shapes,
@@ -1600,7 +1608,7 @@ export class OverlayController {
             kind: "text",
             color: p.color,
             width: 0,
-            at: { ...at },
+            at: { x: at.x - textW / 2, y: at.y },
             text,
             fontPx: p.fontPx * sc,
             bg: p.textBg,

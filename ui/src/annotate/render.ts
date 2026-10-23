@@ -14,6 +14,31 @@ export interface RenderDeps {
 
 const FONT_STACK = '-apple-system, "Segoe UI", "Microsoft YaHei", sans-serif';
 
+/** 与 drawShape 的 text 分支**同一套字体串**（含 Math.round），保证量出来的宽
+ *  和真正画出来的一致 —— 文字要"以点击点为中心"，落点得先知道成品有多宽。 */
+export function textFontCss(fontPx: number, o: { bold?: boolean; italic?: boolean; family?: string }): string {
+  return `${o.bold ? "bold " : ""}${o.italic ? "italic " : ""}${Math.round(fontPx)}px ${
+    o.family ? `"${o.family}", ` : ""
+  }${FONT_STACK}`;
+}
+
+let measureCtx: CanvasRenderingContext2D | null = null;
+
+/** 量一段文字的渲染宽度（物理 px）。字体串与绘制端共用，避免"打字时居中、成品偏一截" */
+export function measureTextWidth(
+  text: string,
+  fontPx: number,
+  o: { bold?: boolean; italic?: boolean; family?: string } = {},
+): number {
+  if (!measureCtx) {
+    const c = document.createElement("canvas").getContext("2d");
+    if (!c) return 0;
+    measureCtx = c;
+  }
+  measureCtx.font = textFontCss(fontPx, o);
+  return measureCtx.measureText(text).width;
+}
+
 export function drawShape(c: CanvasRenderingContext2D, s: Shape, deps: RenderDeps): void {
   switch (s.kind) {
     case "rect": {
@@ -80,10 +105,7 @@ export function drawShape(c: CanvasRenderingContext2D, s: Shape, deps: RenderDep
     }
     case "text": {
       c.save();
-      const style = `${s.bold ? "bold " : ""}${s.italic ? "italic " : ""}${Math.round(s.fontPx)}px ${
-        s.family ? `"${s.family}", ` : ""
-      }${FONT_STACK}`;
-      c.font = style;
+      c.font = textFontCss(s.fontPx, s); // 与 measureTextWidth 同一串，居中才不会偏
       c.textBaseline = "top";
       const m = c.measureText(s.text);
       if (s.bg) {
