@@ -785,7 +785,7 @@ export class OverlayController {
        ② 必须在 releaseEditHandles 之前判，否则"没落在句柄上"就先取消了可编辑态，
        这一支再也拖不动了。工具开着时尤其关键——否则按在身上等于起笔画下一支。 */
     const ed = this.editableShape();
-    if (ed && !this.hitHandle(p) && hitShape(ed, p, this.scale)) {
+    if (ed && !this.hitHandle(p) && hitShapeBody(ed, p, this.scale)) {
       this.pushUndo();
       this.anchor = {
         mode: "shape-move",
@@ -1330,21 +1330,21 @@ export class OverlayController {
   }
 
   /**
-   * 描边 / 填充单选组的落点：圆点=描边、填充按钮=填充，两个入口都走这里。
-   * 用「设为某值」而不是翻转 —— 点已选中的那一项必须原地不动，
-   * 否则单选组会退化成开关，圆点和填充按钮互相打脸。
-   * 选中了已画的矩形/椭圆时连同该图形一起改 —— 否则只动全局默认值，
-   * 用户点选一个图形再按 F 会毫无反应。
-   */
-  /**
-   * 描边/填充这一组**落在哪个图形上**：点选的图形优先，其次"刚画完还带句柄"的那支
+   * 描边 / 填充这一组的**落点**：点选的图形优先，其次"刚画完还带句柄"的那支
    * （录屏 t=20–26：画完矩形带着 8 句柄，此时点描边/填充要改的就是这一支）。
    * 两者都不是矩形/椭圆 → null = 只改全局默认值。
+   *
+   * **记号笔的矩形高亮框必须排除在外**：它不是"描边还是填充"的候选，永远是半透明实心。
+   * 放开 canEditShape 让它带 8 向句柄之后，这里若不排除会连锁出两个 bug：
+   * ① 记号笔属性栏凭空多出描边/填充两个按钮；② 点一下描边就把它的 `filled` 改成 false，
+   * 于是它从"整块区域可拖"退化成"只有四条边可拖"（用户报的现象）。
    */
   private fillTarget(): RectShape | null {
     const cand =
       this.state.shapes.find((x) => x.id === this.state.selectedId) ?? this.editableShape();
-    return cand && (cand.kind === "rect" || cand.kind === "ellipse") ? cand : null;
+    return cand && (cand.kind === "rect" || cand.kind === "ellipse") && !cand.marker
+      ? cand
+      : null;
   }
 
   setFill(filled: boolean): void {
@@ -1901,6 +1901,27 @@ function applyFromOrigin(s: Shape, o: Shape, dx: number, dy: number): void {
       break;
     }
   }
+}
+
+/**
+ * 「按在图形本体上」的判定，只给**整体拖动**用。
+ * 矩形/椭圆按**整个区域**算且不看 `filled`：描边框的内部也要能抓住拖走
+ * （用户要求"整个矩形区域内都可拖动，并不是仅框身"）。
+ * 其余形状沿用 hitShape 的路径 + 容差语义。
+ * 注：无工具时点选任意图形走的仍是 hitShape（不然一个大描边框会把
+ * "在选区内按住拖动选区"整片吞掉），只有带活句柄的这一支享受区域命中。
+ */
+function hitShapeBody(s: Shape, p: Point, scale: number): boolean {
+  if (s.kind === "rect") return inRect(s.r, p);
+  if (s.kind === "ellipse") {
+    const rx = s.r.w / 2;
+    const ry = s.r.h / 2;
+    if (rx <= 0 || ry <= 0) return false;
+    const nx = (p.x - (s.r.x + rx)) / rx;
+    const ny = (p.y - (s.r.y + ry)) / ry;
+    return nx * nx + ny * ny <= 1;
+  }
+  return hitShape(s, p, scale);
 }
 
 function hitShape(s: Shape, p: Point, scale: number): boolean {

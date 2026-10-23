@@ -263,6 +263,15 @@ pointerdown 的判定优先级（顺序错了就拖不动，别再改）：
 所以 `shapeHandles` / `applyShapeHandle` / `resizeRect` 一整套算法**直接复用普通矩形**，
 只是 `canEditShape` 与 `shapeHandles` 原先都把 `s.marker` 排除在外，现已放开。
 
+**按在整个高亮区域内都可整体拖动**（不是只有框身）。两个修复配套：
+
+1. `fillTarget()` 排除 `marker`。放开句柄之后，记号笔矩形被「描边/填充」组认成了目标，
+   于是记号笔属性栏凭空多出两个按钮；而且点一下描边就把它的 `filled` 改成 false，
+   图形随即退化成「只有四条边能抓」—— 这就是「仅框身」的来源。
+2. 本体命中改用 `hitShapeBody()`：矩形/椭圆按**整个区域**判定且**不看 `filled`**
+   （椭圆用归一化方程，不是外接方框），所以描边框的内部同样抓得住。
+   无工具时点选任意图形仍走 `hitShape` —— 否则一个大描边框会把「在选区内按住拖选区」整片吞掉。
+
 ### 7. 马赛克
 
 ![马赛克属性栏](capshot-图/马赛克png.png)
@@ -400,6 +409,7 @@ pointerdown 的判定优先级（顺序错了就拖不动，别再改）：
 | 50 | 绘图时的光标归属 | 非工具条区域（含选区外暗区）一律显示标注光标，只有 bar 内切系统箭头 | 有工具时 `hotHandle` 不再抢光标（`updateCursor` 与 `draw()` 的 `grabHandle` 同步加 `!s.tool` 条件）；bar 内控件已是 `cursor: default` |
 | 52 | 光标决策收口 | 多处出现"缩放光标与绘制光标同屏" | 根因是"要不要自绘光标"在 `updateCursor()` 与 `draw()` 各判一遍。新增唯一决策点 `cursorPlan()` 一次返回 {系统css, 自绘kind+r}，二者严格互斥；两边都只读它。顺带删掉 `drawCross`/`grabHandle` 两个中间状态 |
 | 62 | 橡皮/马赛克多一个十字 | 圈由画布画的三档不该再有十字 | 新增 `blank` 光标（全透明 32×32 图）替代 `cross` 占位；不用 `cursor:none`（WebView2 切回不生效会留残影）。超大记号笔那一档同步改走 blank |
+| 67 | 记号笔矩形「仅框身可拖」 | 整个高亮区域内都可拖动；记号笔属性栏不该出现描边/填充 | ① `fillTarget()` 排除 `marker`，连锁修掉「多出两个按钮」+「点描边把 filled 改 false 导致只剩四边」；② 新增 `hitShapeBody()`：矩形/椭圆按整个区域命中、不看 `filled`（椭圆走归一化方程） |
 | 66 | 带句柄图形的整体拖动 | 有手柄的图形，鼠标都要能拖着走 | pointerdown 在"图形句柄 / 选区手柄"之后、`releaseEditHandles()` 之前加一档：命中 `editableShape()` 本体（`hitShape`）就走 `shape-move`，句柄保持不交还。此前工具开着时按在图形身上等于起笔画下一支 |
 | 64 | 记号笔矩形模式句柄 | 画完也给 8 向句柄、可调整 | `canEditShape` / `shapeHandles` 放开对 `s.marker` 的排除；算法整套复用普通矩形（它就是 `kind:"rect"`+`marker:true`），点别处同样定稿 |
 | 65 | 文本框与光标同一横线 | I 梁、输入框、文字要在同一条横线上（垂直） | 输入框 `translateY(-50%)` 垂直居中于点击点 + `commitText` 上移半个字高（绘制端 `textBaseline:"top"`，不补就会回车后往下跳半行） |
