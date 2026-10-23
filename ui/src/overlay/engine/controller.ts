@@ -143,6 +143,8 @@ export class OverlayController {
   private editId: number | null = null;
   /** 光标当前压着 editId 那支的哪个句柄（"a"/"b"/"first"/"last"/"nw"…"w"）；null = 没压着 */
   private hotEdit: string | null = null;
+  /** 指针压在「带活句柄图形」的本体上 → 悬停就给拖动光标（不必等按下） */
+  private hotBody = false;
   /** 指针在画布内吗：自绘十字只在画布内画，移到工具条上就该消失 */
   private pointerIn = false;
   /** store 订阅里挂 updateCursor —— 见 bind() 的注释 */
@@ -670,15 +672,20 @@ export class OverlayController {
        光标必须诚实反映这一点（上一条我加了 !s.tool 限制，导致"只有按下才切换"）。
        绘制光标此时让位，不会出现两个光标同屏。 */
     if (this.hotHandle) return { css: CURSOR_FOR_HANDLE[this.hotHandle], drawn: null };
+    /* 压在「带活句柄图形」的本体上 → **悬停就给拖动光标**，不等按下（用户要求）。
+       判定与 pointerdown 那一档共用 hitShapeBody + 同样的优先级（图形句柄 > 选区手柄 > 本体），
+       所以光标说"这里能拖"，点下去就一定是在拖，不会出现承诺而不兑现。 */
+    if (this.hotBody) return { css: "move", drawn: null };
     if (s.tool === "text" || s.pendingTextAt) return { css: "text", drawn: null };
     if (!s.tool && s.phase === "adjusting" && (this.hoverShapeId !== null || this.inSel(p)))
       return { css: "move", drawn: null };
     /* 一律给"真实光标图"（cursor: url(...) 热点），不再用 `cursor: none` + 画布自绘：
        WebView2 从具名光标切回 none 不立即生效，会留下"缩放光标 + 绘制光标"双光标（实测）。
        只要系统里始终有一个真实光标，就不存在"该隐藏却没隐藏"这个状态。
-       超过光标图上限（32px）的笔刷 —— 橡皮 4–80、马赛克 8–80 —— 仍由画布补一圈
-       尺寸预览，光标本身给细十字做精确定位。 */
-    // 十字的尺寸写死在 cursorImage（15px / 1px，照录屏实测），这里不再传半径
+       超过光标图上限（32px）的笔刷 —— 橡皮 4–80、马赛克 8–80、大号记号笔 ——
+       仍由画布补一圈尺寸预览，系统光标位给**全透明图**占位（blank），
+       既不多画一个十字，也不会因 `cursor:none` 不生效而留残影。 */
+    // 十字的几何写死在 cursorImage（20×20 闭合加号），所以这里传 0 不参与
     const cross = cursorUrl("cross", 0, "");
     const blank = cursorUrl("blank", 0, "");
     const tc = this.toolCursor();
@@ -727,20 +734,39 @@ export class OverlayController {
     const sh = idle && !h && !s.tool ? this.shapeAt(p) : null;
     // 不再要求 inSel：画在选区外的标注也要能悬停/点选（与"标注不被选区裁剪"配套）
     const id = sh ? sh.id : null;
-    if (ei === nextEdit && h === this.hotHandle && id === this.hoverShapeId) return;
+    /* 带活句柄图形的**本体**是否被压住 —— 条件必须与 onPointerDown 那一档逐字一致
+       （句柄优先、选区手柄优先、同一套 hitShapeBody），否则光标承诺了"能拖"
+       而点击却去做别的事。这一档不看 s.tool：有工具时按在身上同样是拖动而非起新笔。 */
+    const ed = this.editableShape();
+    const body = idle && h === null && !!ed && hitShapeBody(ed, p, this.scale);
+    if (
+      ei === nextEdit &&
+      h === this.hotHandle &&
+      id === this.hoverShapeId &&
+      body === this.hotBody
+    )
+      return;
     this.hotEdit = nextEdit;
     this.hotHandle = h;
     this.hoverShapeId = id;
+    this.hotBody = body;
     this.mark();
   }
 
   /** 悬停态作废（按下、切工具、退回检测态、指针离开画布时都要清，
    *  否则高亮/放大的那颗点会赖在最后一帧上） */
   private clearHover(): void {
-    if (this.hotHandle === null && this.hoverShapeId === null && this.hotEdit === null) return;
+    if (
+      this.hotHandle === null &&
+      this.hoverShapeId === null &&
+      this.hotEdit === null &&
+      !this.hotBody
+    )
+      return;
     this.hotHandle = null;
     this.hoverShapeId = null;
     this.hotEdit = null;
+    this.hotBody = false;
     this.mark();
   }
 
