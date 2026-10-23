@@ -1596,8 +1596,11 @@ export class OverlayController {
       const sc = this.scale;
       const p = this.state.props;
       this.pushUndo();
-      /* 输入框左边缘就落在点击点、文字从框左边起排（见 TextInput + .snip-textinput 的
-         padding-left:0），所以成品直接以点击点为文字左沿，不需要任何补偿。 */
+      /* 水平：输入框左边缘落在点击点、文字从框左边起排（.snip-textinput 的 padding-left:0），
+         所以 at.x 就是点击 x，不需要补偿。
+         垂直：输入框是 translateY(-50%) 居中于点击点的，而绘制端用 textBaseline:"top"
+         （at.y = em 盒顶），故这里上移半个字高，让成品文字的行中心也落在点击点 ——
+         否则回车提交后文字会往下跳半行。 */
       this.store.set({
         shapes: [
           ...this.state.shapes,
@@ -1606,7 +1609,7 @@ export class OverlayController {
             kind: "text",
             color: p.color,
             width: 0,
-            at: { ...at },
+            at: { x: at.x, y: at.y - (p.fontPx * sc) / 2 },
             text,
             fontPx: p.fontPx * sc,
             bg: p.textBg,

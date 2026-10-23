@@ -39,11 +39,18 @@ export default function TextInput({ ctrl }: { ctrl: OverlayController }) {
     255;
 
   return (
-    /* 输入框**左边缘落在点击点**（不再居中），文字也从框的左边缘起排（见 theme.css 的
-       padding-left:0）—— 于是「I 梁光标的热点 = 框左边 = 文字起点 = 成品文字左沿」四者一条线。 */
+    /* 输入框**左上角落在点击点**：左边缘对齐靠 padding-left:0（见 theme.css），
+       垂直方向靠 translateY(-50%) —— 浏览器的输入框把文字按内容盒垂直居中，
+       所以框中心线 = 文字中线 = 点击点那条横线，I 梁光标与框、文字三者同在一条线上。
+       提交时 commitText 同样按半个字高补偿 at.y，成品文字才不会比打字时低半行。 */
     <div
       className="snip-textinput"
-      style={{ left: `${left}px`, top: `${top}px`, fontSize: `${fontPx}px` }}
+      style={{
+        left: `${left}px`,
+        top: `${top}px`,
+        fontSize: `${fontPx}px`,
+        transform: "translateY(-50%)",
+      }}
     >
       <input
         ref={inputRef}
