@@ -18,6 +18,7 @@ import {
   shapeHandleDir,
   type Shape,
   shapeHandles,
+  sizeDotPx,
 } from "../../annotate/model";
 import { parse as parseAnnotation } from "../../annotate/serialize";
 import {
@@ -405,9 +406,10 @@ export class OverlayController {
        红色大点 → 红色小点，正是滚轮改线宽的前后两态）。
        上一轮我拿 t=83（矩形工具拖角）和 t=127（箭头已定稿）当成了箭头光标，样本取错，
        把这条误撤了 —— 文档 §4 原话是对的。 */
-    // 画笔与箭头同一套光标（用户要求同步；#1310 说的 pen size 驱动光标也吻合）
+    /* 箭头 / 画笔：中心圆直径 = 工具条圆点直径（同一 sizeDotPx 公式，用户要求两处同径）。
+       r 存物理 px，故 CSS 直径 × scale。短线只是装饰，不计入"光标大小"。 */
     if (s.tool === "arrow" || s.tool === "polyline") {
-      return { kind: "dotTicks", r: Math.max(3, (p.width * sc) / 2) };
+      return { kind: "dotTicks", r: (sizeDotPx(p.width, 1) / 2) * sc };
     }
     return null;
   }

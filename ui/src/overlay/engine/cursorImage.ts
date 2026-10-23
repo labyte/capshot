@@ -65,8 +65,10 @@ export function cursorUrl(kind: CursorKind, rPx: number, color: string): string 
     x.beginPath();
     x.arc(m, m, r, 0, Math.PI * 2);
     x.fill();
+    // 短线是装饰，不计入"光标大小"；但必须容得下 —— 圆点按工具条同径后可以长到
+    // 半径 10，再按 r*0.9 画短线就会顶出 32 的画布，所以这里夹一下。
     const gap = r + 2.5;
-    const tick = Math.max(3, r * 0.9);
+    const tick = Math.max(2, Math.min(Math.max(3, r * 0.9), S / 2 - gap - 0.5));
     x.strokeStyle = color;
     x.lineWidth = Math.max(1.5, r * 0.3);
     x.lineCap = "round";

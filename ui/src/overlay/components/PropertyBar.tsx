@@ -13,15 +13,12 @@ import {
 } from "react";
 import type { OverlayController } from "../engine/controller";
 import type { ChromeBag } from "./chrome";
-import { FONT_FAMILIES, FONT_SIZES, PALETTE } from "../../annotate/model";
+import { FONT_FAMILIES, FONT_SIZES, PALETTE, sizeDotPx } from "../../annotate/model";
 import { IconBlur, IconEllipse, IconMosaic, IconRect } from "../../shared/icons";
 
-/**
- * 圆点预览直径：把值线性映射后夹进按钮盒内（圆点盒 24×22）。
- * 不缩的话橡皮 80 半径→30px、马赛克 80 直径→42px，会撑破按钮。
- * 精确数值以悬停浮标为准，圆点只表意"粗 / 细"。
- */
-const dotPx = (value: number, per: number) => Math.min(20, 2 + value / per);
+// 圆点预览直径统一走 model.ts 的 sizeDotPx —— 与箭头/画笔光标的中心圆同一公式，
+// 两处永远同径（用户要求）。橡皮/马赛克用各自的 per 把 80 量级压回 20 以内。
+const dotPx = sizeDotPx;
 
 export default function PropertyBar({
   ctrl,

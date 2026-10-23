@@ -126,6 +126,13 @@ export interface DrawProps {
   eraserRadius: number;
 }
 
+/**
+ * 线宽圆点的直径（CSS px）：工具条上的预览点 **和** 箭头/画笔光标的中心圆
+ * 都走这一个公式，保证两处同径（用户要求：光标大小以中心圆为准，且与工具条圆点一致）。
+ * 夹在 20 以内：再大就撑破 32 的格子，也超过光标图能容纳的范围。
+ */
+export const sizeDotPx = (value: number, per = 1) => Math.min(20, 2 + value / per);
+
 /** 字体下拉的候选（webview 里无法枚举系统字体，给一组 Windows 常见 + 兜底） */
 export const FONT_FAMILIES = [
   "Microsoft YaHei UI",
