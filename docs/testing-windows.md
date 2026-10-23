@@ -395,6 +395,11 @@ cmd / PowerShell 里运行：
 Windows 仍要 `RC` 指向 SDK 的 `x64/rc.exe`）见 CLAUDE.md「tauri CLI 的接法」。
 报 `Port 1420 is already in use` = 上次遗留的 vite 没退干净，杀掉占端口的 node 即可。
 
+> **`tauri dev` 会覆盖 `target/debug/capshot.exe`**：写进去的是**没有内嵌前端**的 dev 版，只认
+> `localhost:1420`。用完它再直接双击这个 exe，vite 不在就是**一张错误网页**（本轮真踩过）。
+> 恢复：`cargo build -p desktop --features custom-protocol`。
+> 判别：`grep -a -o 'TextInput-[A-Za-z0-9_-]*\.js' target/debug/capshot.exe` 有输出=内嵌版，空=dev 版。
+
 ■ 已知边界（欢迎反馈）
   - Win10 无 SetIsBorderRequired → WGC 截图可能带黄框（Win11 正常）
   - DRM/部分硬件叠加层窗口截出为黑（系统限制，同类工具一致）

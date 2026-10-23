@@ -68,6 +68,13 @@ cargo test --workspace
 多半是上次遗留的 vite 没退干净）。**发布产物不走 CLI**：`release.yml` 用的是
 `npm run build` + `cargo build --release -p desktop --features custom-protocol`。
 
+> **⚠ `tauri dev` 会覆盖 `target/debug/capshot.exe`**（真踩过）：它写进去的是**没有内嵌前端**的
+> dev 版，只认 `localhost:1420`。所以跑完 `tauri dev` 之后再直接起这个 exe，**没有 vite 就是一张
+> 错误网页**。回到"独立可跑的 debug 版"要重编一次：
+> `cargo build -p desktop --features custom-protocol`。
+> 一眼判别法：`grep -a -o 'TextInput-[A-Za-z0-9_-]*\.js' target/debug/capshot.exe`
+> 有输出 = 内嵌版（独立可跑）；**空 = dev 版（必须配 vite）**。
+
 ## 测试包目录 `capshot-win-x64/`
 
 gitignored 的本地打包产物目录（exe + WebView2Loader.dll + probe.exe + README-test.md），
