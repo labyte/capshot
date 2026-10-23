@@ -35,25 +35,33 @@ export function cursorUrl(kind: CursorKind, rPx: number, color: string): string 
   const m = S / 2 + 0.5; // 1px 线压在像素中心，避免抗锯齿糊化
 
   if (kind === "cross") {
-    /* 简单十字：一条 1px 黑线，横竖各 15px（录屏实测 Snipaste 就是这个尺寸）。
-       下面只垫 2px 白，等于黑线两侧各 0.5px 发丝边 —— 纯粹为了深底上不至于完全看不见；
-       原来垫 3px 白晕，视觉上糊成一团粗十字，不像一个干净的加号。 */
-    const arm = 7;
-    const cross = () => {
-      x.beginPath();
-      x.moveTo(m - arm, m);
-      x.lineTo(m + arm, m);
-      x.moveTo(m, m - arm);
-      x.lineTo(m, m + arm);
-      x.stroke();
-    };
-    x.lineCap = "butt";
-    x.strokeStyle = "rgba(255,255,255,0.75)";
-    x.lineWidth = 2;
-    cross();
+    /* 十字 = **一个闭合的 12 点多边形**（加号形），整体 11×11、臂厚 3：
+       中透明白填充 + 1px 黑描边。
+       为什么不再是"两条线叠白边"：那样白边只剩 0.5px，被抗锯齿吃掉，
+       黑底上整个光标等于不可见（实测）。闭合多边形有真正的填充面积，
+       深底靠白填充、浅底靠黑描边，两头都在。
+       坐标全部落在 .5 上（m=16），1px 描边才会压在像素中心而不糊。 */
+    const c0 = S / 2; // 16：配上 .5 的偏移量后顶点落在像素半格上，1px 描边不糊
+    const L = 5.5; // 半长 → 总 11px
+    const t = 1.5; // 半臂厚 → 臂宽 3px，整体保持纤细
+    const pts: [number, number][] = [
+      [-t, -L], [t, -L], [t, -t], [L, -t], [L, t], [t, t],
+      [t, L], [-t, L], [-t, t], [-L, t], [-L, -t], [-t, -t],
+    ];
+    x.beginPath();
+    pts.forEach(([dx, dy], i) => {
+      const px = c0 + dx;
+      const py = c0 + dy;
+      if (i === 0) x.moveTo(px, py);
+      else x.lineTo(px, py);
+    });
+    x.closePath(); // 封口
+    x.fillStyle = "rgba(255,255,255,0.5)"; // 中透明
+    x.fill();
     x.strokeStyle = "#000";
     x.lineWidth = 1;
-    cross();
+    x.lineJoin = "miter";
+    x.stroke();
   } else if (kind === "dot") {
     // 记号笔：实心圆，半透明当前色 + 实边（与它涂出来的高亮同观感）
     x.globalAlpha = 0.55;
