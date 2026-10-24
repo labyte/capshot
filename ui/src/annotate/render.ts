@@ -185,6 +185,43 @@ export function drawArrow(
 ): void {
   const ang = Math.atan2(y2 - y1, x2 - x1);
   const len = Math.hypot(x2 - x1, y2 - y1);
+  /* 楔形渐尖（参照图）：整支箭是一个填充多边形——尾端收成一个点、杆向头部线性
+     渐宽、头部是比杆宽得多的实心三角。不画描边杆，lineWidth 只决定杆在头底的厚度。
+     双端组合不产自属性栏（下拉四选一），此分支按单端画。 */
+  if (headStyle === "tapered") {
+    if (len < 1) return;
+    const shaftHalf = Math.max(0.8, width * 0.4);
+    // 头宽 = 杆头宽的 3 倍（地板 3.5 CSS px）；头长 = 头半宽 / 0.45（半角约 24°），
+    // 短箭上头长夹到全长一半并按同比例收回头宽，避免头比箭还长
+    let headHalf = Math.max(3.5 * scale, shaftHalf * 3);
+    let hl = headHalf / 0.45;
+    if (hl > len * 0.5) {
+      hl = len * 0.5;
+      headHalf = hl * 0.45;
+    }
+    const cos = Math.cos(ang);
+    const sin = Math.sin(ang);
+    // 局部坐标：原点在箭尖、-x 朝尾；旋转平移到世界坐标
+    const P = (lx: number, ly: number): [number, number] => [
+      x2 + lx * cos - ly * sin,
+      y2 + lx * sin + ly * cos,
+    ];
+    const pts: [number, number][] = [
+      P(0, 0), // 箭尖
+      P(-hl, -headHalf), // 头底外上
+      P(-hl, -shaftHalf), // 头底内上（杆上缘起点）
+      P(-len, 0), // 尾尖
+      P(-hl, shaftHalf), // 头底内下
+      P(-hl, headHalf), // 头底外下
+    ];
+    c.beginPath();
+    c.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) c.lineTo(pts[i][0], pts[i][1]);
+    c.closePath();
+    c.fillStyle = color;
+    c.fill();
+    return;
+  }
   // 头部随线宽长，但夹角别太窄：线宽大时太窄的镖形会被粗杆吃掉，看不出是箭头
   const head = Math.max(9 * scale, width * 3);
   const half = 0.42;

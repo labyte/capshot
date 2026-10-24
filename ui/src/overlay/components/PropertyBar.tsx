@@ -207,13 +207,22 @@ export default function PropertyBar({
           </>
         )}
 
-        {/* 箭头样式：一个下拉三选项，纯符号无文字。选「无头/单/双」同时定死头部=实心
-            （hollow 仍能被渲染，兼容历史数据，只是不再提供入口） */}
+        {/* 箭头样式：单下拉四选项，纯符号无文字（楔形那档符号不可靠，给文字）。
+            四档 = 无头直线 / 实心三角单端 / 实心三角双端 / 楔形渐尖（参照图，
+            尾细头宽的整体填充多边形）。hollow 仍能被渲染，兼容历史数据，只是不再提供入口 */}
         {t === "arrow" && (
           <select
             className="snip-select snip-astyle"
             title="箭头样式"
-            value={p.arrowHead === "none" ? "none" : p.arrowDouble ? "double" : "single"}
+            value={
+              p.arrowHead === "none"
+                ? "none"
+                : p.arrowHead === "tapered"
+                  ? "tapered"
+                  : p.arrowDouble
+                    ? "double"
+                    : "single"
+            }
             onChange={(e) => {
               const v = e.target.value;
               ctrl.setProps(
@@ -221,13 +230,16 @@ export default function PropertyBar({
                   ? { arrowHead: "none", arrowDouble: false }
                   : v === "double"
                     ? { arrowHead: "solid", arrowDouble: true }
-                    : { arrowHead: "solid", arrowDouble: false },
+                    : v === "tapered"
+                      ? { arrowHead: "tapered", arrowDouble: false }
+                      : { arrowHead: "solid", arrowDouble: false },
               );
             }}
           >
             <option value="none" title="无箭头直线">—</option>
-            <option value="single" title="单箭头">→</option>
-            <option value="double" title="双箭头">↔</option>
+            <option value="single" title="单箭头（实心三角头）">→</option>
+            <option value="double" title="双箭头（实心三角头）">↔</option>
+            <option value="tapered" title="楔形渐尖箭头（尾细头宽、末端尖）">楔形</option>
           </select>
         )}
 

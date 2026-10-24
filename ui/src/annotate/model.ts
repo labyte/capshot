@@ -29,7 +29,7 @@ export interface RectShape extends BaseShape {
   marker?: boolean;
 }
 
-export type ArrowHead = "solid" | "hollow" | "none";
+export type ArrowHead = "solid" | "hollow" | "none" | "tapered";
 
 export interface ArrowShape extends BaseShape {
   kind: "arrow";
@@ -37,7 +37,8 @@ export interface ArrowShape extends BaseShape {
   b: Point;
   /** 双向箭头（属性栏的 →/↔ 选择）。旧数据缺省 = 单向 */
   double?: boolean;
-  /** 箭头头部样式：实心三角 / 空心 V / 无头直线。旧数据缺省 = solid */
+  /** 箭头头部样式：实心三角 / 空心 V / 无头直线 / 楔形渐尖（tapered：尾细头宽的
+   *  整体填充多边形，参照 Snipaste 录屏图）。旧数据缺省 = solid */
   head?: ArrowHead;
 }
 
