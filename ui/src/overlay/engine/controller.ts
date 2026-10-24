@@ -750,7 +750,9 @@ export class OverlayController {
     // （本方法只在没有按下锚点时被调用，不必再判 drawing/tool-drawing）
     const ei = this.hotEdit;
     const nextEdit = this.hitEditable(p);
-    const idle = s.phase === "adjusting" && !s.pendingTextAt && nextEdit === null;
+    /* 输入态也要能悬停选区手柄（否则边框上光标不给缩放箭头、按下能resize但
+       看着不像能抓）；图形悬停反馈仍由下面的 !s.tool 挡着，打字时不会噪 */
+    const idle = s.phase === "adjusting" && nextEdit === null;
     // 选区手柄**任何工具下都可抓**（随时可调选区）；图形悬停反馈只在没有工具时给
     const h = idle ? this.hitHandle(p) : null;
     const sh = idle && !h && !s.tool ? this.shapeAt(p) : null;
@@ -807,18 +809,29 @@ export class OverlayController {
       return;
     }
     if (s.pendingTextAt) {
-      /* 点别处 = 结束上一条，并**立即在点处开下一条**（Snipaste 连续文字标注）。
-         以前这里提交完就 return，用户得再点一次才出新输入框。两次 store.set 在
-         同一事件里被 React 批处理，TextInput 的 <input> 节点会被复用 —— 清 value、
-         重新量宽、下一帧 refocus 都由它的 passive effect（deps=[at]）兜住。 */
-      this.commitText();
-      this.store.set({
-        pendingTextAt: { ...p },
-        pendingTextRot: 0,
-        pendingTextId: this.state.pendingTextId + 1,
-      });
-      this.mark();
-      return;
+      /* 落在**选区手柄/边框**、或「刚画完那一支」的活句柄/本体上 = 操纵选区/图形，
+         不是"点别处开新一条"：放行到下面的正常命中链（resize/shape-edit/shape-move），
+         输入框保留不动。否则输入态下选区手柄看着能抓、一按却变成把输入框搬过来
+         （用户报"鼠标在选区边框上无法改变选区大小"）。 */
+      const ed = this.editableShape();
+      const isManip =
+        this.hitHandle(p) !== null ||
+        this.hitEditable(p) !== null ||
+        (ed !== null && hitShapeBody(ed, p, this.scale));
+      if (!isManip) {
+        /* 点别处 = 结束上一条，并**立即在点处开下一条**（Snipaste 连续文字标注）。
+           以前这里提交完就 return，用户得再点一次才出新输入框。两次 store.set 在
+           同一事件里被 React 批处理，TextInput 的 <input> 节点会被复用 —— 清 value、
+           重新量宽、下一帧 refocus 都由它的 passive effect（deps=[pendingTextId]）兜住。 */
+        this.commitText();
+        this.store.set({
+          pendingTextAt: { ...p },
+          pendingTextRot: 0,
+          pendingTextId: this.state.pendingTextId + 1,
+        });
+        this.mark();
+        return;
+      }
     }
     this.canvas.setPointerCapture(e.pointerId);
 
@@ -1325,6 +1338,10 @@ export class OverlayController {
   // ---------- 工具、属性与图形 ----------
 
   setTool(t: ToolId | null): void {
+    /* 切工具 = 离开当前文字输入态：**先提交再切**（用户要求：点工具条按钮应保存
+       文字并为确认状态；旧语义是整框丢弃，表现为"点了工具条打了一半的字消失"）。
+       键盘快捷键切工具走同一路径同语义；commitText 自己会清 pendingTextAt/rot/value。 */
+    if (this.state.pendingTextAt) this.commitText();
     /* 句柄还活着的那支矩形/椭圆 + 又点了「矩形/椭圆」= **就地换形状**，不是离开这一支
        （录屏 t=28：填充矩形带 8 句柄，点椭圆后原地变成椭圆、句柄不消失）。
        所以这条分支不能走下面的 releaseEditHandles。 */
@@ -1345,7 +1362,7 @@ export class OverlayController {
       this.mark();
       return;
     }
-    // 切工具时丢弃未提交的文字输入（输入框随 pendingTextAt 一起消失）
+    // 输入态已在函数开头提交（见顶部注释）；这里再清一次是兜底无 pending 的路径
     this.store.set({ tool: t, selectedId: null, pendingTextAt: null, pendingTextRot: 0 });
     this.clearHover();
     // 切到别的工具 = 离开刚才那一支，句柄随之消失
