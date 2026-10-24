@@ -9,6 +9,7 @@ import { cursorUrl, MAX_CURSOR_RADIUS } from "./cursorImage";
 import { PixelReader } from "./pixelReader";
 import { makeScratch } from "../../annotate/mosaic";
 import { drawShapes } from "../../annotate/render";
+import { measureTextWidth } from "../../annotate/textMetrics";
 import {
   applyShapeHandle,
   canEditShape,
@@ -1977,8 +1978,12 @@ function hitShape(s: Shape, p: Point, scale: number): boolean {
       }
       return false;
     case "text": {
-      const w = Math.max(8, s.text.length * s.fontPx * 0.6);
-      return inRect({ x: s.at.x, y: s.at.y, w, h: s.fontPx * 1.3 }, p);
+      /* 与 shapeBounds 同一口径走真 measureText（`字数 × 0.6` 对汉字窄一半：
+         中文那一支只能抓到左半边）。勾了底色时墨迹往左右各多 2px（render.ts 的 bg 分支），
+         命中区跟着一起扩，点底色边缘也算点中这支文字。 */
+      const pad = s.bg ? 2 : 0;
+      const w = Math.max(8, measureTextWidth(s.text, s.fontPx, s) + pad * 2);
+      return inRect({ x: s.at.x - pad, y: s.at.y, w, h: s.fontPx * 1.3 }, p);
     }
     case "step":
       return Math.hypot(p.x - s.at.x, p.y - s.at.y) <= s.radius + tol;

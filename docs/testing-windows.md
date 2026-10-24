@@ -333,6 +333,32 @@ pointerdown 的判定优先级（顺序错了就拖不动，别再改）：
 框中心线 = 文字中线 = 点击那条横线。`commitText` 相应把 `at.y` **上移半个字高**
 （绘制端是 `textBaseline:"top"`，`at.y` 是 em 盒顶），不补偿的话回车后文字会往下跳半行。
 
+**输入框宽度随内容伸缩**（取代先前的固定宽）：原先 `.snip-textinput input` 有 `min-width:140px`，
+`<input>` 又没设 `size`，固有宽度取浏览器默认的 20 字符 —— 打超 20 字符后框不再变宽，
+文字只在框里横向滚动，**看不见自己正在输入的尾部**。现在由 `TextInput` 的 `fit()` 量出内容宽写进
+`style.width`，三个口径要说清：
+
+- **地板 = 占位符「输入」的宽度**（不是 140px）。紧贴选区右缘点字时上限会算成**负数**，
+  而 `style.width = "-3px"` 被 CSSOM 静默丢弃、连报错都没有，框会塌成一字符宽的缝，比固定宽更糟。
+- **上限 = 选区右缘减 8px**（不是窗口右缘）：导出只取选区那块，夹到窗口右缘的话，
+  在选区右半边打长句会「提交后少半截字」。
+- **`+9px`** 而非 `+7px`：全局 border-box 下右 padding 5 + 左右 1px 虚线边框 = 7，
+  再留 2px 给末尾插入符和斜体的右 overhang（内容盒恰好等于字形 advance 时光标压在盒右缘看不见）。
+  **左 padding 仍然必须是 0**（见上一段）。
+
+量宽走 `ui/src/annotate/textMetrics.ts`（`textFontCss` / `textFontFamily` / `measureTextWidth`），
+绘制、输入框、命中框三方共用同一串字体，所以「打字时框里多宽」=「回车后成品墨迹多宽」。
+两个必须同步的细节：DOM 的 `font-size` 要用**已取整**的字号（`textFontCss` 内部取整，
+150% 缩放下一边 13px 一边 13.333px 就会系统性窄 2.5%），DOM 的 `font-family` 要用
+`textFontFamily()` 吐出的**同一条回退链**（原先写的是 `"${family}", sans-serif`，
+字体没装时 DOM 走 Arial 而量宽走 Segoe UI，拉丁字形差 3–5%）。
+
+顺带修掉两处同源的旧账：① 中文输入法组合期按 Enter 选候选词，那记 keydown 早于 compositionend 到达，
+原先会把**拼音串**直接落图（Esc 同理会连已打的字整框销毁），现按 `isComposing` 挡掉；
+② 文字命中框原先用 `字数 × 字号 × 0.6` 猜宽，0.6 对汉字不成立（CJK advance ≈ 1.0 em），
+「你好世界」18px 实宽 ~72px 而猜出来只有 43px → **只能抓到左半边**，现改走真 `measureText`
+（勾了底色时墨迹左右各多 2px，命中区一起扩）。
+
 ### 9. 橡皮擦
 
 ![橡皮属性栏](capshot-图/橡皮擦.png)
@@ -421,6 +447,7 @@ pointerdown 的判定优先级（顺序错了就拖不动，别再改）：
 | 50 | 绘图时的光标归属 | 非工具条区域（含选区外暗区）一律显示标注光标，只有 bar 内切系统箭头 | 有工具时 `hotHandle` 不再抢光标（`updateCursor` 与 `draw()` 的 `grabHandle` 同步加 `!s.tool` 条件）；bar 内控件已是 `cursor: default` |
 | 52 | 光标决策收口 | 多处出现"缩放光标与绘制光标同屏" | 根因是"要不要自绘光标"在 `updateCursor()` 与 `draw()` 各判一遍。新增唯一决策点 `cursorPlan()` 一次返回 {系统css, 自绘kind+r}，二者严格互斥；两边都只读它。顺带删掉 `drawCross`/`grabHandle` 两个中间状态 |
 | 62 | 橡皮/马赛克多一个十字 | 圈由画布画的三档不该再有十字 | 新增 `blank` 光标（全透明 32×32 图）替代 `cross` 占位；不用 `cursor:none`（WebView2 切回不生效会留残影）。超大记号笔那一档同步改走 blank |
+| 71 | 文字输入框宽度 | 不该固定，按输入文本的长度伸缩 | `fit()` 量内容宽写进 `style.width`（地板=占位符宽、上限=选区右缘减 8px、`+9px` 补边框与插入符）；量宽与绘制同口径，新增 `annotate/textMetrics.ts`，顺带修 IME 组合期 Enter 落拼音、文字命中框 `×0.6` 猜宽抓不到右半边 |
 | 70 | 取色阶段多余坐标 | 放大镜面板里已有 `(1352 , 843)`，光标旁那个浮标纯属重复 | 删 `posLabel` 三处（`Readout.tsx` 的 div、`chromeLayout.tsx` 的定位块、`chrome.ts` 的 `ChromeRefs` 字段）；两者显示条件本就同为 `loupeVisible` |
 | 69 | 取色阶段边框 | 要细，且兼容任何背景色（两张参考图一深一浅） | 悬停框与定稿后的选区框统一走 `contrastRect()`：1px 主色芯 + 白晕双描边。旧法是 3px 实心蓝单线，实测在同色蓝背景上整条消失 |
 | 68 | 可拖动区域的光标反馈 | 悬停就该给拖动光标，不是按下才切换 | `updateHover` 新增 `hotBody`（与 pointerdown 本体档共用 `hitShapeBody` + 同一优先级），`cursorPlan` 在选区手柄之后、工具光标之前加一档返回 `move`；不看 `s.tool`。`clearHover` 一并复位 |

@@ -2,6 +2,7 @@
 //! 坐标：绘制期为「本显示器物理 px」；导出时转成「选区相对 px」再序列化（见 serialize.ts）。
 
 import { handlePoints, resizeRect, type Handle, type Point, type Rect } from "../overlay/engine/types";
+import { measureTextWidth } from "./textMetrics";
 
 export type ShapeKind =
   | "rect"
@@ -236,7 +237,15 @@ export function shapeBounds(s: Shape): Rect {
     case "step":
       return { x: s.at.x - s.radius, y: s.at.y - s.radius, w: s.radius * 2, h: s.radius * 2 };
     case "text":
-      return { x: s.at.x, y: s.at.y, w: s.text.length * s.fontPx * 0.6, h: s.fontPx * 1.25 };
+      /* 宽走真 measureText，不再用 `字数 × 字号 × 0.6` 猜：0.6 对汉字完全不成立
+         （CJK advance ≈ 1.0 em），「你好世界」18px 实宽 ~72px 而猜出来只有 43px →
+         bounds 比画出来的墨迹短一大截，勾了底色（render.ts 往左右各扩 2px）更对不上。 */
+      return {
+        x: s.at.x,
+        y: s.at.y,
+        w: measureTextWidth(s.text, s.fontPx, s) + (s.bg ? 4 : 0),
+        h: s.fontPx * 1.25,
+      };
     case "erase":
       if (s.mode === "rect" && s.r) return s.r;
       if (s.pts && s.pts.length) {

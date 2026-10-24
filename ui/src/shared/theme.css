@@ -650,7 +650,8 @@ body.settings code {
   /* 左内边距给 0：输入框左边缘落在点击点，文字也要从框左边起排，
      否则插入符会比成品文字右移 6px（5 padding + 1 border），"打字位置"与"成品位置"对不上 */
   padding: 2px 5px 2px 0;
-  min-width: 140px;
+  /* 没有 min-width：宽度由 TextInput 的 fit() 按内容量出来给（随文字伸缩，
+     地板=占位符宽，上限=选区右缘）。写死在这里会在短字时又把框撑回一长条。 */
   /* 全局 user-select:none 会渗进输入框：打字没事，但框内选不了字 */
   user-select: text;
   -webkit-user-select: text;

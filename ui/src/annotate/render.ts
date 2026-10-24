@@ -3,6 +3,7 @@
 import { drawBlocked, drawBlurred } from "./mosaic";
 import { shapeBounds } from "./model";
 import type { ArrowHead, EraseShape, Shape } from "./model";
+import { textFontCss, textFontFamily } from "./textMetrics";
 import type { Rect } from "../overlay/engine/types";
 
 export interface RenderDeps {
@@ -12,15 +13,7 @@ export interface RenderDeps {
   scratch: HTMLCanvasElement;
 }
 
-const FONT_STACK = '-apple-system, "Segoe UI", "Microsoft YaHei", sans-serif';
-
-/** drawShape 的 text 分支与任何"量文字宽度"的地方共用这一串（含 Math.round），
- *  免得两处度量口径不一致。 */
-export function textFontCss(fontPx: number, o: { bold?: boolean; italic?: boolean; family?: string }): string {
-  return `${o.bold ? "bold " : ""}${o.italic ? "italic " : ""}${Math.round(fontPx)}px ${
-    o.family ? `"${o.family}", ` : ""
-  }${FONT_STACK}`;
-}
+// 字体串与量宽统一在 textMetrics.ts（绘制 / 输入框 / 命中框三方共用同一口径），此处只 import。
 
 export function drawShape(c: CanvasRenderingContext2D, s: Shape, deps: RenderDeps): void {
   switch (s.kind) {
@@ -157,7 +150,7 @@ export function drawShape(c: CanvasRenderingContext2D, s: Shape, deps: RenderDep
       c.lineWidth = Math.max(1, s.radius * 0.12);
       c.stroke();
       c.fillStyle = "#fff";
-      c.font = `bold ${Math.round(s.radius * 1.15)}px ${FONT_STACK}`;
+      c.font = `bold ${Math.round(s.radius * 1.15)}px ${textFontFamily()}`;
       c.textAlign = "center";
       c.textBaseline = "middle";
       c.fillText(String(s.n), s.at.x, s.at.y + s.radius * 0.05);
