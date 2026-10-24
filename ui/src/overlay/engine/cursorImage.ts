@@ -55,18 +55,16 @@ export function cursorUrl(kind: CursorKind, rPx: number, color: string): string 
     return blankUrl();
   }
   if (kind === "cross") {
-    /* 整像素十字。旧实现是 12 点加号多边形 + 0.5px 描边：2px 臂宽被描边两侧各吃
-       0.25px 后白芯只剩 1.5px，落在两个像素列上每列仅 75% 白 —— AA 后整条臂是
-       **灰色**、只有中心 2×2 是白点（逐像素 dump 实证），肉眼看就是"十字架畸形"。
-       现改两层整数 rect、不经过抗锯齿：黑加号（臂宽 4px、长 22）上叠白加号
-       （臂宽 2px、长 20），四周天然 1px 黑描边、内角四像素也自动包黑。
-       白芯列 15,16 的中心 = 16 = 热点。任何缩放下都是 crisp 的整数块。 */
+    /* 整像素细十字：黑加号（臂宽 3px、长 22）上叠白加号（臂宽 1px、长 20），
+       四周天然 1px 黑描边、内角四像素自动包黑，不经过抗锯齿（历史教训：
+       多边形+0.5px 描边会让白芯被 AA 成灰色"畸形十字"；4px 臂版用户嫌粗）。
+       白芯列 16 = 热点列，深底靠白芯、浅底靠黑边两头都读得出。 */
     x.fillStyle = "#000";
-    x.fillRect(14, 5, 4, 22);
-    x.fillRect(5, 14, 22, 4);
+    x.fillRect(15, 5, 3, 22);
+    x.fillRect(5, 15, 22, 3);
     x.fillStyle = "#fff";
-    x.fillRect(15, 6, 2, 20);
-    x.fillRect(6, 15, 20, 2);
+    x.fillRect(16, 6, 1, 20);
+    x.fillRect(6, 16, 20, 1);
   } else if (kind === "rotate") {
     /* 旋转光标：环形箭头（约 300° 圆弧 + 末端小箭头），白芯 + 黑描边（与 cross 同一
        可读性分工：深底靠白芯、浅底靠黑边）。给输入框的旋转手柄 hover 用。
