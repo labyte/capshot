@@ -55,34 +55,18 @@ export function cursorUrl(kind: CursorKind, rPx: number, color: string): string 
     return blankUrl();
   }
   if (kind === "cross") {
-    /* 十字 = 闭合的 12 点加号多边形（用户定的参数）：
-       半长 10 → 总尺寸 20×20；臂宽 2（半厚 t=1.0）；中心纯白不透明；黑描边 0.5px。
-       **白芯 1.5px**：臂宽 2 减去 0.5px 描边向内压进的两侧各 0.25 → 2 - 0.5 = 1.5。
-       可见性两头分工：深底靠纯白填充，浅底靠黑描边。
-       为什么不是"两条线叠白边"：那样白边只剩 0.5px 会被抗锯齿吃掉，黑底上等于不可见（实测过）。
-       c0 必须等于热点（文件末尾的 `S/2 S/2`），否则"看着对准了其实没对准"；
-       且 c0 - L 不能小于 0，否则臂会被裁到画布外。 */
-    const c0 = S / 2; // 16：与热点同心；16-10=6 仍在画布内
-    const L = 10; // 半长 → 总 20px
-    const t = 1; // 半臂厚 → 臂宽 2px，白芯 1.5px
-    const pts: [number, number][] = [
-      [-t, -L], [t, -L], [t, -t], [L, -t], [L, t], [t, t],
-      [t, L], [-t, L], [-t, t], [-L, t], [-L, -t], [-t, -t],
-    ];
-    x.beginPath();
-    pts.forEach(([dx, dy], i) => {
-      const px = c0 + dx;
-      const py = c0 + dy;
-      if (i === 0) x.moveTo(px, py);
-      else x.lineTo(px, py);
-    });
-    x.closePath(); // 封口
-    x.fillStyle = "#fff"; // 中心纯白
-    x.fill();
-    x.strokeStyle = "#000";
-    x.lineWidth = 0.5;
-    x.lineJoin = "miter";
-    x.stroke();
+    /* 整像素十字。旧实现是 12 点加号多边形 + 0.5px 描边：2px 臂宽被描边两侧各吃
+       0.25px 后白芯只剩 1.5px，落在两个像素列上每列仅 75% 白 —— AA 后整条臂是
+       **灰色**、只有中心 2×2 是白点（逐像素 dump 实证），肉眼看就是"十字架畸形"。
+       现改两层整数 rect、不经过抗锯齿：黑加号（臂宽 4px、长 22）上叠白加号
+       （臂宽 2px、长 20），四周天然 1px 黑描边、内角四像素也自动包黑。
+       白芯列 15,16 的中心 = 16 = 热点。任何缩放下都是 crisp 的整数块。 */
+    x.fillStyle = "#000";
+    x.fillRect(14, 5, 4, 22);
+    x.fillRect(5, 14, 22, 4);
+    x.fillStyle = "#fff";
+    x.fillRect(15, 6, 2, 20);
+    x.fillRect(6, 15, 20, 2);
   } else if (kind === "rotate") {
     /* 旋转光标：环形箭头（约 300° 圆弧 + 末端小箭头），白芯 + 黑描边（与 cross 同一
        可读性分工：深底靠白芯、浅底靠黑边）。给输入框的旋转手柄 hover 用。
