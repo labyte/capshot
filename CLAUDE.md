@@ -77,22 +77,34 @@ cargo test --workspace
 
 ## 推送 GitHub 走 VPN 代理
 
-推送反复出现 `Recv failure: Connection was reset` / `Failed to connect to github.com port 443` 时，
-走 VPN 客户端的 HTTP 代理（本机全流量接管端口 **7890**）：
+推送反复出现 `Recv failure: Connection was reset` / `Failed to connect to github.com port 443`
+（而 `api.github.com` 反而通 200）时，是 `github.com` 这个主机名被掐。VPN 客户端切到
+**「系统 HTTP 代理」模式**后走它的代理即可。
+
+**端口别写死，从注册表读**——那是系统代理的权威来源，客户端换端口/换机器都跟着变：
 
 ```bash
-git config http.https://github.com.proxy http://127.0.0.1:7890   # 只影响 github 这一个远端
-# …push…
-git config --unset http.https://github.com.proxy                 # 用完撤掉
+reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" //v ProxyServer
+# 本机实测 = 127.0.0.1:12000（不是 7890；文档里曾长期写着 7890，那个端口压根没人听）
 ```
 
-**两条必须知道的坑**（都实测过）：
+用 `-c` 一次性带代理推，**不写进 config**，用完没有残留、也不需要 `--unset`：
 
-1. **先确认 7890 在听再设**：`netstat -ano | grep "127.0.0.1:7890.*LISTENING"`。
-   客户端跑的是 **TUN 全流量接管**时，这个端口往往不存在——此时设了代理等于把推送弄瘫
-   （实测：端口没人听时 `git ls-remote` 直接失败，而**直连是通的**）。
-   TUN 模式下什么都不用配，直连即可。
-2. **别写 `--global`**：per-URL 规则只作用于 `github.com`，全局设了会影响其它内网 git。
+```bash
+# 先确认真能通（拿到 200 再推）：
+curl -m 15 -x http://127.0.0.1:12000 -sS -o /dev/null -w "%{http_code}\n" https://github.com/
+# 再推：
+git -c http.https://github.com.proxy=http://127.0.0.1:12000 push origin main
+```
+
+**三条必须知道的坑**（都实测过）：
+
+1. **先确认端口在听再设**：`netstat -ano | grep ":<端口>.*LISTENING"`。
+   客户端跑的是 **TUN 全流量接管**时端口往往不存在——此时设了代理等于把推送弄瘫
+   （实测：端口没人听时 `git ls-remote` 直接失败，而**直连是通的**）。TUN 模式下什么都不用配，直连。
+2. **`curl -x` 试通 ≠ 端口能当代理**：8888 上有监听，但拿它当代理是 `Proxy CONNECT aborted`。
+   只有 `curl -x http://127.0.0.1:<端口> https://github.com/` 返回 200 才算数。
+3. **别写 `--global`**：per-URL 规则只作用于 `github.com`，全局设了会影响其它内网 git。
 
 ## 测试包目录 `capshot-win-x64/`
 
