@@ -83,8 +83,7 @@ export function cursorUrl(kind: CursorKind, rPx: number, color: string): string 
     x.lineWidth = 0.5;
     x.lineJoin = "miter";
     x.stroke();
-  }
-  if (kind === "rotate") {
+  } else if (kind === "rotate") {
     /* 旋转光标：环形箭头（约 300° 圆弧 + 末端小箭头），白芯 + 黑描边（与 cross 同一
        可读性分工：深底靠白芯、浅底靠黑边）。给输入框的旋转手柄 hover 用。
        弧先画黑粗线再叠白细线出"描边"效果；箭头三角贴在弧终点的切线方向上。 */
