@@ -7,11 +7,14 @@ Tauri v2 截图工具（对齐 Snipaste 交互），Rust workspace + Vite/React 
 - **仅 main 分支触发发布**：release.yml 有 `preflight` 守卫，判断「被推的标签提交是否为
   `origin/main` 的祖先」，不在 main 上则三个 job 全部跳过。发布流程固定为：
   开发分支 → 合并到 main → 在 main 上打 `v*` 标签 → 才构建。
-- **压缩包文件名必须带版本号**：`capshot-win-x64-<tag>.zip`、`capshot-macos-arm64-<tag>.zip`
-  （如 `capshot-win-x64-v0.1.8.zip`）。tag 从 `GITHUB_REF_NAME` 取；
-  upload-artifact 的 path 用 glob（`capshot-*-*.zip`），Create Release 步骤同步匹配。
-- 改产物命名时三处必须一起改：build-windows 的 `Compress-Archive -DestinationPath`、
-  build-macos 的 `zip -r`、release job 的 `gh release create` 文件参数。
+- **产物文件名必须带版本号**：免安装 `capshot-win-x64-<tag>.zip`、`capshot-macos-arm64-<tag>.zip`；
+  安装版 `capshot-win-x64-<tag>-setup.exe`（NSIS）、`capshot-macos-arm64-<tag>.dmg`。
+  tag 从 `GITHUB_REF_NAME` 取。NSIS/DMG 的默认名（`CapsShot_<ver>_x64-setup.exe` /
+  `CapsShot_<ver>_aarch64.dmg`）必须在各平台 Package 步骤 rename 成约定名。
+  upload-artifact 的 path 用 glob（`capshot-win-x64-*` / `capshot-macos-arm64-*`，zip+安装版一起），
+  release job 的 `gh release create` **显式列四个文件**（缺任何一个直接报错，不让 release 静默少附件）。
+- 改产物命名时四处必须一起改：build-windows 的 `Compress-Archive` 与 setup rename、
+  build-macos 的 `zip -r` 与 dmg rename、release job 的 `gh release create` 文件清单。
   artifact 名（`capshot-win-x64` / `capshot-macos-arm64`）被 download-artifact 的
   `pattern: capshot-*` 匹配，不要动。
 
@@ -81,8 +84,10 @@ cargo test --workspace
 
 `tauri dev` 编的是**不带 `custom-protocol`** 的 debug 二进制，运行时连 `http://localhost:1420`，
 所以 vite 必须在（CLI 的 `beforeDevCommand` 会自己起，端口被占就报 `Port 1420 is already in use`——
-多半是上次遗留的 vite 没退干净）。**发布产物不走 CLI**：`release.yml` 用的是
-`npm run build` + `cargo build --release -p desktop --features custom-protocol`。
+多半是上次遗留的 vite 没退干净）。**发布主链路走 `tauri build --bundles`**（v0.1.21 起）：exe 与安装包（NSIS/DMG）出自同一次
+构建（release 下 `custom-protocol` 默认开，build-windows 的 Package 步骤用下面这条一眼判别法
+做自检，缺失即失败）；zip 免安装包仍手工 `Compress-Archive` / `zip` 组装。
+别再改回裸 `cargo build` 出 exe——那会丢掉安装包，且 custom-protocol 漏开时没人兜底。
 
 > **⚠ `tauri dev` 会覆盖 `target/debug/capshot.exe`**（真踩过）：它写进去的是**没有内嵌前端**的
 > dev 版，只认 `localhost:1420`。所以跑完 `tauri dev` 之后再直接起这个 exe，**没有 vite 就是一张

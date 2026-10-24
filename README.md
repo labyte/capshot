@@ -59,7 +59,9 @@ cargo check --target x86_64-pc-windows-msvc -p capture-windows   # mac 上的类
 ## CI 与下载
 
 - CI：push/PR 在 `windows-latest`（MSVC）与 `macos-14` 原生构建 + `cargo test`（`.github/workflows/ci.yml`）
-- 发布：打 tag `v*` → Release 附件 `capshot-win-x64.zip`（capshot.exe + probe.exe + WebView2Loader.dll）与 `capshot-macos-arm64.zip`（capshot.app + probe）
+- 发布：打 tag `v*` → Release 四个附件：免安装 `capshot-win-x64-<tag>.zip`（capshot.exe + probe.exe + WebView2Loader.dll）、
+  `capshot-macos-arm64-<tag>.zip`（capshot.app + probe）；安装版 `capshot-win-x64-<tag>-setup.exe`（NSIS）、
+  `capshot-macos-arm64-<tag>.dmg`（未签名/未公证，与 zip 同待遇，首跑有系统警告）
 - Windows 验收步骤见 `docs/testing-windows.md`
 
 ## 运行

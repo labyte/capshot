@@ -67,11 +67,19 @@ jobs:
           for p in index overlay pin settings history editor; do
             [ -f "dist/$p.html" ] || { echo "::error::dist/$p.html 未产出（vite.config.js 的 rollupOptions.input 漏页）"; exit 1; }
           done
-      - run: cargo build --release -p desktop --bin capshot --features custom-protocol
+      # 根目录 CLI（tauri 只装在根 package.json）；tauri build 同时产出
+      # target/release/capshot.exe（custom-protocol 默认开）与 NSIS 安装包
+      - name: Install root CLI
+        run: npm ci
+      - name: Tauri build (exe + NSIS installer)
+        run: npm run tauri build -- --bundles nsis
       - run: cargo build --release -p capture-windows --example probe
       - name: Package
         shell: pwsh
         run: |
+          # 发布二进制自检：custom-protocol 内嵌前端（规则里的一眼判别法），缺失即失败
+          $emb = Select-String -Path target/release/capshot.exe -Pattern 'TextInput-[A-Za-z0-9_-]+\.js' -Quiet
+          if (-not $emb) { Write-Error "capshot.exe 未内嵌前端（custom-protocol 没开？）"; exit 1 }
           mkdir pkg
           Copy-Item target/release/capshot.exe pkg/
           Copy-Item target/x86_64-pc-windows-gnu/release/examples/probe.exe pkg/probe.exe -ErrorAction SilentlyContinue
@@ -79,10 +87,12 @@ jobs:
           Copy-Item tools/win-x64/WebView2Loader.dll pkg/
           Copy-Item docs/testing-windows.md pkg/README-test.md
           Compress-Archive -Path pkg/* -DestinationPath "capshot-win-x64-$env:GITHUB_REF_NAME.zip"
+          # 安装版：NSIS 默认名 CapsShot_<ver>_x64-setup.exe，按约定改带 tag 的名
+          Copy-Item target/release/bundle/nsis/*-setup.exe "capshot-win-x64-$env:GITHUB_REF_NAME-setup.exe"
       - uses: actions/upload-artifact@v4
         with:
           name: capshot-win-x64
-          path: capshot-win-x64-*.zip
+          path: capshot-win-x64-*
 
   build-macos:
     needs: preflight
@@ -107,19 +117,26 @@ jobs:
           for p in index overlay pin settings history editor; do
             [ -f "dist/$p.html" ] || { echo "::error::dist/$p.html 未产出（vite.config.js 的 rollupOptions.input 漏页）"; exit 1; }
           done
-      - run: cargo build --release -p desktop --bin capshot --features custom-protocol
+      # 根目录 CLI；tauri build 产出 target/release/capshot（custom-protocol 默认开）
+      # 与 bundle/macos/*.app、bundle/dmg/*.dmg（未签名/未公证，与 zip 同待遇）
+      - name: Install root CLI
+        run: npm ci
+      - name: Tauri build (app + DMG)
+        run: npm run tauri build -- --bundles dmg
       - run: cargo build --release -p capture-macos --example probe
-      - name: Bundle .app + zip
+      - name: Bundle .app + zip + dmg
         run: |
           chmod +x scripts/make-app.sh
           ./scripts/make-app.sh target/release/capshot dist/capshot.app
           cp target/release/examples/probe dist/probe
           zip -r "capshot-macos-arm64-${GITHUB_REF_NAME}.zip" dist/capshot.app dist/probe docs/testing-windows.md
+          # 安装版：DMG 默认名 CapsShot_<ver>_aarch64.dmg，按约定改带 tag 的名
+          cp target/release/bundle/dmg/*_aarch64.dmg "capshot-macos-arm64-${GITHUB_REF_NAME}.dmg"
 
       - uses: actions/upload-artifact@v4
         with:
           name: capshot-macos-arm64
-          path: capshot-macos-arm64-*.zip
+          path: capshot-macos-arm64-*
 
   release:
     needs: [preflight, build-windows, build-macos]
@@ -132,9 +149,13 @@ jobs:
           merge-multiple: true
       - name: Create Release
         run: |
-          # 产物文件名带版本号（tag 名），glob 匹配两个平台的 zip
+          # 产物文件名带版本号（tag 名）：免安装 zip ×2 + 安装版（NSIS setup / DMG）。
+          # 显式列四个文件，缺任何一个 gh 会直接报错（不让 release 静默少附件）
           gh release create "${GITHUB_REF_NAME}" \
-            capshot-*-"${GITHUB_REF_NAME}".zip \
+            capshot-win-x64-"${GITHUB_REF_NAME}".zip \
+            capshot-win-x64-"${GITHUB_REF_NAME}"-setup.exe \
+            capshot-macos-arm64-"${GITHUB_REF_NAME}".zip \
+            capshot-macos-arm64-"${GITHUB_REF_NAME}".dmg \
             --title "capshot ${GITHUB_REF_NAME}" \
             --generate-notes
         env:
