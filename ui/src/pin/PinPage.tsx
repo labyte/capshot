@@ -7,7 +7,8 @@
 //!     直接按旋转后的盒给元素尺寸，转 90° 会得到反向的比例
 //!   dpr 用 window.devicePixelRatio（WebView2 每显示器 DPI 感知，等于该屏 scale），
 //!     只有需要「当前窗口原点」时才对 pin_bounds 往返一次
-//! 3c（贴图上直接涂画）与 3d（原生右键菜单）另做。
+//! 3d（原生右键菜单）已做，但三项功能因宿主侧行为不正确被暂时摘掉 —— 见 openMenu 里的
+//! 「待办」注释块与 docs/testing-windows.md「贴图右键菜单：待办」。3c（贴图上直接涂画）另做。
 
 import {
   useCallback,
@@ -235,6 +236,29 @@ export default function PinPage() {
     await applyWindow({ ...target, x: cur.x, y: cur.y });
   }, [applyWindow, origin, windowFor]);
 
+  /**
+   * 恢复原始大小：zoom→1 并退出缩略图模式，旋转/翻转/透明度/灰度一概不动
+   * （那是中键「已复位」的活）。
+   *
+   * 缩略图态必须跟着一起清 —— 只把窗口尺寸按整图放大，而 thumbScale 还按
+   * THUMB_W/base.w 缩着，结果就是「大窗口里一张小图 + 一圈空白」。
+   * 菜单项和中键复位共用这一份，别再各写一遍走岔。
+   */
+  const resetZoom = useCallback(async () => {
+    await resizeTo(1, null, false);
+    setThumbRestore(null);
+    thumbRef.current = null;
+  }, [resizeTo]);
+
+  /**
+   * Ctrl+C / Ctrl+S 的出口。
+   *
+   * ⚠ 走的是截图层那条 export_result，带三个不该有的副作用（历史窗重复入库、
+   * 改写 last_rect、关掉正在进行的会话 overlay）—— 详见 openMenu 里的「待办 P1」。
+   * 右键菜单上的「复制到剪贴板 / 保存」已因此隐藏，这两个快捷键仍留在原行为上：
+   * 摘掉它们等于贴图完全没有出图口，属于功能回退，等 export_core 支持 from_pin
+   * 再一起收口。
+   */
   const exportOp = useCallback(
     async (op: "copy" | "save") => {
       if (!boot) return;
@@ -329,9 +353,7 @@ export default function PinPage() {
       if (e.button === 1) {
         e.preventDefault();
         void (async () => {
-          await resizeTo(1, null, false);
-          setThumbRestore(null);
-          thumbRef.current = null;
+          await resetZoom();
           setOpacity(1);
           toast("已复位");
         })();
@@ -355,7 +377,7 @@ export default function PinPage() {
       window.addEventListener("pointerup", stop);
       window.addEventListener("pointercancel", stop);
     },
-    [resizeTo, toast],
+    [resetZoom, toast],
   );
 
   const onDblClick = useCallback(
@@ -372,7 +394,12 @@ export default function PinPage() {
   // ---------- 右键菜单（JS 侧构造，popup 到光标） ----------
   // 走前端 menu API 而不是 Rust：Manager::get_window 在 tauri 的 `unstable` feature 后面
   // （lib.rs:567），不开该 feature 就拿不到 popup_at 要的 owned Window<R>；
-  // 而 core:menu:default 已把全部菜单命令授予前端。
+  // 而 core:menu:default（capabilities 里的 core:default 已含）把全部菜单命令授予前端。
+  // popup 的 at 是**窗口客户区**相对坐标（tauri/src/menu/mod.rs:728 → muda 内部 ClientToScreen），
+  // 所以直接喂 e.clientX/clientY 的逻辑像素就对。
+  //
+  // ⚠ 有三项功能被暂时摘掉（复制 / 保存 / 重新编辑），成因与恢复条件
+  //   写在下面的「待办」注释块里，另见 docs/testing-windows.md「贴图右键菜单：待办」一节。
   const openMenu = useCallback(
     async (e: ReactMouseEvent) => {
       e.preventDefault();
@@ -391,11 +418,44 @@ export default function PinPage() {
       });
       const menu = await Menu.new({
         items: [
-          await item("复制到剪贴板", () => void exportOp("copy")),
-          await item("保存", () => void exportOp("save")),
-          await item("重新编辑…", () => void invoke("open_editor_window", { sel: boot.sel })),
-          await sep(),
-          await item("恢复原始大小", () => void resizeTo(1, null, false)),
+          // ───────────────── 待办：以下三项暂时隐藏 ─────────────────
+          //
+          // P1 「复制到剪贴板」/「保存」—— 两者都调 export_result，而 export_core
+          //    （commands.rs）是为**截图层**写的一条龙：无条件 `history.insert()` +
+          //    落 PNG/JPEG 两个文件，末尾还 `close_session_overlays()` 并把
+          //    `last_rect` 改写成贴图自己的 rect。后果：
+          //      · 贴图每复制/保存一次，历史窗就多一条**同图重复**条目（贴图那张
+          //        在 op="pin" 时已经入过一次库了）；
+          //      · 「H 恢复上次选区」被贴图的 rect 顶掉；
+          //      · 顺带关掉正在进行的截图会话 overlay。
+          //    另外导出的是 `sel` 的原始像素，旋转/翻转/灰度/反色都是 CSS 层的，
+          //    不会被烘进去 —— 与屏上所见不一致。
+          //    恢复条件：ExportReq 加 `from_pin`（或 `skip_history`）标记，export_core
+          //    据此跳过入库/关会话/写 last_rect；并决定要不要把当前变换烘进导出图。
+          //
+          // P1 「重新编辑…」—— open_editor_window(sel) 拿到的是**已烘焙**的 sel.png
+          //    当底图，而 bootstrap 同时把 `s.annotation` 交回给编辑器，
+          //    controller.loadFrame() 再 parseAnnotation 还原一遍图形 →
+          //    带标注截出来的贴图，进编辑器后**标注画两遍**。
+          //    另外编辑器是普通窗、贴图是 always-on-top，两者重叠时编辑器被压在下面；
+          //    且编辑导出后贴图不会刷新（img src 是启动时取的 blob URL）。
+          //    恢复条件：底图与 annotation 二选一（存原图 + 图形，或存烘焙图 + 不还原），
+          //    并在导出后回推贴图重载。
+          //
+          // await item("复制到剪贴板", () => void exportOp("copy")),
+          // await item("保存", () => void exportOp("save")),
+          // await item("重新编辑…", () => void invoke("open_editor_window", { sel: boot.sel })),
+          // ─────────────────────────────────────────────────────────
+
+          // 缩放组：zoomBy 走 zoomRef，且内部按 thumbRef 决定是否保持缩略图宽度，
+          // 与滚轮/`+`/`-` 是同一条路径。
+          // 「恢复原始大小」走 resetZoom（zoom→1 + 退出缩略图模式），与中键复位共用一份实现。
+          await item("恢复原始大小", () =>
+            void (async () => {
+              await resetZoom();
+              toast("100%");
+            })(),
+          ),
           await item("放大", () => void zoomBy(1.2, null)),
           await item("缩小", () => void zoomBy(1 / 1.2, null)),
           await item("缩略图模式", () => void toggleThumb()),
@@ -421,7 +481,7 @@ export default function PinPage() {
       menuRef.current = menu;
       await menu.popup(new LogicalPosition(e.clientX, e.clientY));
     },
-    [resizeTo, boot, exportOp, gray, invert, through, toast, toggleThumb, topmost, zoomBy],
+    [boot, gray, invert, resetZoom, through, toast, toggleThumb, topmost, zoomBy],
   );
 
   if (!boot || !src) return null;
