@@ -84,6 +84,17 @@ export function drawShape(c: CanvasRenderingContext2D, s: Shape, deps: RenderDep
       c.font = textFontCss(s.fontPx, s);
       c.textBaseline = "top";
       const m = c.measureText(s.text);
+      if (s.rot) {
+        /* 绕盒中心旋转：中心口径与 shapeBounds / hitShape 三方共用
+           （w 含 bg 外扩、h = 1.25×字号），输入框旋转手柄的角度直接落在这里 */
+        const w = m.width + (s.bg ? 4 : 0);
+        const h = s.fontPx * 1.25;
+        const cx = s.at.x + w / 2;
+        const cy = s.at.y + h / 2;
+        c.translate(cx, cy);
+        c.rotate(s.rot);
+        c.translate(-cx, -cy);
+      }
       if (s.bg) {
         c.fillStyle = "rgba(0,0,0,.45)";
         c.fillRect(s.at.x - 2, s.at.y - 2, m.width + 4, s.fontPx + 4);

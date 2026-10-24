@@ -31,6 +31,12 @@ export interface PaintInput {
    * dotTicks = 圆点 + 四向短线（箭头），点用**当前标注色**、直径随线宽变。
    */
   toolCursor: { x: number; y: number; r: number; kind: "ring" | "dashDot"; color?: string } | null;
+  /**
+   * 正在拖动的橡皮擦矩形（物理 px）；null = 无。仅 tool-drawing 期间非空。
+   * erase 图形是纯 destination-out 遮罩、不产生可见像素，拖动时必须另画一圈轮廓，
+   * 否则在没有标注的区域框选擦除完全看不到范围。
+   */
+  draftEraseRect: Rect | null;
 }
 
 /**
@@ -89,6 +95,12 @@ export function paint(
 
   // 选区定稿后的边框：与取色阶段的悬停框同一画法（同一根线的两个阶段，粗细不该变）
   contrastRect(ctx, i.sel, i.accent, i.deps.scale);
+
+  /* 橡皮擦矩形模式拖动中的轮廓：画在压暗罩之后（暗区里也可见），
+     与选区拖动态同一视觉语言。定稿后 erase 回归隐形遮罩，这里自然不再画。 */
+  if (i.draftEraseRect && i.draftEraseRect.w > 0 && i.draftEraseRect.h > 0) {
+    contrastRect(ctx, i.draftEraseRect, i.accent, i.deps.scale);
+  }
 
   /* 图形的虚线包围盒：选中态实色，悬停态压淡一档并细一点。
      两者同一套画法 —— 悬停只是"还没点下去的选中"，不该另发明一种视觉语言。 */

@@ -131,6 +131,13 @@ export default function PropertyBar({
               value={p.fontPx}
               onChange={(e) => ctrl.setProps({ fontPx: Number(e.target.value) })}
             >
+              {/* 拉伸手柄/滚轮会产生候选之外的小数字号（参照图属性栏就显示 13.71）：
+                  把当前值补成一个 option，否则 select 显示空白 */}
+              {!FONT_SIZES.includes(p.fontPx) && (
+                <option key="current" value={p.fontPx}>
+                  {Math.round(p.fontPx * 100) / 100}
+                </option>
+              )}
               {FONT_SIZES.map((f) => (
                 <option key={f} value={f}>
                   {f}

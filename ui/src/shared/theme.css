@@ -644,11 +644,19 @@ body.settings code {
 .snip-textinput input {
   font: inherit;
   color: #fff;
-  background: rgba(0, 0, 0, 0.55);
-  border: 1px dashed var(--snip-accent);
-  outline: none;
+  /* 全透明底 + **黑白描边**（用户指定）：黑芯（border）+ 纯白晕（outline，不吃布局）。
+     两层都必须**纯色不透明**：白晕带 alpha 在白底上呈浅灰、深底上呈灰白（用户报
+     "现在是灰色"）；纯黑芯白底清楚、纯白晕黑底剥出芯，任何背景读得出 */
+  background: transparent;
+  border: 1px solid #000;
+  outline: 1px solid #fff;
+  /* 文本区是**输入态**：I 梁光标、按下落插入符（浏览器默认行为，不拦）；
+     整体拖动只在框边抓取带上（.snip-ti-ring），见那里的注释 */
+  cursor: text;
   /* 左内边距给 0：输入框左边缘落在点击点，文字也要从框左边起排，
-     否则插入符会比成品文字右移 6px（5 padding + 1 border），"打字位置"与"成品位置"对不上 */
+     否则插入符会比成品文字右移 6px（5 padding + 1 border），"打字位置"与"成品位置"对不上。
+     剩下的 1px 左边框仍会把字形推离点击点 1 CSS px —— 这段差由 commitText 落定
+     at.x 时补回（见那里的水平/垂直对齐注释），提交前后字形不横跳 */
   padding: 2px 5px 2px 0;
   /* 没有 min-width：宽度由 TextInput 的 fit() 按内容量出来给（随文字伸缩，
      地板=占位符宽，上限=选区右缘）。写死在这里会在短字时又把框撑回一长条。 */
@@ -656,6 +664,47 @@ body.settings code {
   user-select: text;
   -webkit-user-select: text;
 }
+
+/* 拖动抓取带：以框边线为中心的 8px 环（外 4 + 内 4），四条合围、中间透空——
+   文本区的事件照常落在 input 上。绝对定位的层叠天然盖过普通流的 input，
+   又被 DOM 顺序在后的角手柄盖住。cursor:move + 按住 = 整体移动输入框 */
+.snip-textinput .snip-ti-ring {
+  position: absolute;
+  cursor: move;
+  touch-action: none;
+}
+.snip-ti-ring-t { left: -4px; right: -4px; top: -4px; height: 8px; }
+.snip-ti-ring-b { left: -4px; right: -4px; bottom: -4px; height: 8px; }
+.snip-ti-ring-l { left: -4px; top: 0; bottom: 0; width: 8px; }
+.snip-ti-ring-r { right: -4px; top: 0; bottom: 0; width: 8px; }
+
+/* 输入框手柄（参照 Snipaste 参照图）：蓝底白 glyph 小方块，居中压在四角/顶心上，
+   随框一起旋转（是 wrapper 的子节点）。定位用 left/top + 负 margin 把 14×14 的
+   方块中心对准角点；touch-action:none 保证手柄上的 pointer 序列不被滚动打断 */
+.snip-textinput .snip-ti-h {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  background: var(--snip-accent);
+  color: #fff;
+  border-radius: 3px;
+  /* flex 居中：内部是自绘 SVG（拉伸角）或文字 glyph（关闭/旋转），两种都要居中 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  z-index: 1;
+}
+.snip-ti-tl { left: 0; top: 0; cursor: nwse-resize; }
+.snip-ti-bl { left: 0; top: 100%; cursor: nesw-resize; }
+.snip-ti-br { left: 100%; top: 100%; cursor: nwse-resize; }
+.snip-ti-close { left: 100%; top: 0; cursor: pointer; }
+/* 旋转手柄悬在顶心上方 18px，圆形以区别于角上的拉伸块 */
+.snip-ti-rot { left: 50%; top: -18px; cursor: grab; border-radius: 50%; }
 
 .snip-toast {
   position: fixed;

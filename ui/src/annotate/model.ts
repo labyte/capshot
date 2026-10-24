@@ -57,6 +57,8 @@ export interface TextShape extends BaseShape {
   italic?: boolean;
   strike?: boolean;
   family?: string;
+  /** 旋转角（弧度，绕文字盒中心）。旧数据没有 = 0；输入框的旋转手柄落定到此 */
+  rot?: number;
 }
 
 export interface MosaicShape extends BaseShape {
@@ -149,6 +151,10 @@ export const FONT_FAMILIES = [
 /** 字号下拉的候选（CSS px，物理像素在 controller 里乘 scale） */
 export const FONT_SIZES = [12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64];
 
+/** 字号夹取范围：滚轮 / 输入框拉伸手柄共用（拉伸是连续值，会落在候选之外） */
+export const FONT_MIN = 12;
+export const FONT_MAX = 64;
+
 export const DEFAULT_PROPS: DrawProps = {
   // 参照图当前色块实测值，落在 PALETTE 里（默认不显示"自选色"角标）
   color: "#ed1c24",
@@ -240,12 +246,35 @@ export function shapeBounds(s: Shape): Rect {
       /* 宽走真 measureText，不再用 `字数 × 字号 × 0.6` 猜：0.6 对汉字完全不成立
          （CJK advance ≈ 1.0 em），「你好世界」18px 实宽 ~72px 而猜出来只有 43px →
          bounds 比画出来的墨迹短一大截，勾了底色（render.ts 往左右各扩 2px）更对不上。 */
-      return {
-        x: s.at.x,
-        y: s.at.y,
-        w: measureTextWidth(s.text, s.fontPx, s) + (s.bg ? 4 : 0),
-        h: s.fontPx * 1.25,
-      };
+      const w = measureTextWidth(s.text, s.fontPx, s) + (s.bg ? 4 : 0);
+      const h = s.fontPx * 1.25;
+      if (!s.rot) return { x: s.at.x, y: s.at.y, w, h };
+      /* 旋转包围盒：四角绕盒中心转 rot 取极值。中心口径与 render/hit 三方共用
+         （w 含 bg 外扩、h = 1.25×字号），改一处必须三处一起改 */
+      const cx = s.at.x + w / 2;
+      const cy = s.at.y + h / 2;
+      const co = Math.cos(s.rot);
+      const si = Math.sin(s.rot);
+      let x0 = Infinity,
+        y0 = Infinity,
+        x1 = -Infinity,
+        y1 = -Infinity;
+      for (const [px, py] of [
+        [s.at.x, s.at.y],
+        [s.at.x + w, s.at.y],
+        [s.at.x, s.at.y + h],
+        [s.at.x + w, s.at.y + h],
+      ]) {
+        const dx = px - cx;
+        const dy = py - cy;
+        const rx = cx + dx * co - dy * si;
+        const ry = cy + dx * si + dy * co;
+        x0 = Math.min(x0, rx);
+        x1 = Math.max(x1, rx);
+        y0 = Math.min(y0, ry);
+        y1 = Math.max(y1, ry);
+      }
+      return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
     case "erase":
       if (s.mode === "rect" && s.r) return s.r;
       if (s.pts && s.pts.length) {

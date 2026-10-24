@@ -10,7 +10,7 @@
 //! 半径 32px、橡皮 4–80、马赛克 8–80）仍由画布画圈当尺寸预览，
 //! 光标本身只给一个精确定位的细十字。
 
-export type CursorKind = "cross" | "dotTicks" | "dot" | "blank";
+export type CursorKind = "cross" | "dotTicks" | "dot" | "blank" | "rotate";
 
 /** 光标图能容纳的最大半径（CSS px）。超过这个值就改走"十字光标 + 画布补圈"。 */
 export const MAX_CURSOR_RADIUS = 15;
@@ -33,9 +33,9 @@ function blankUrl(): string {
 /** 生成（并缓存）一个以中心为热点的 CSS cursor 值 */
 export function cursorUrl(kind: CursorKind, rPx: number, color: string): string {
   const r = Math.max(1, Math.min(S / 2 - 1, rPx));
-  // cross / blank 的字形尺寸与半径无关（cross 写死在分支里，blank 干脆不画），
+  // cross / blank / rotate 的字形尺寸与半径无关（各自写死在分支里），
   // 缓存键也不能带 rPx，否则同一个形状会按传进来的半径存好几份
-  const keyed = kind === "cross" || kind === "blank" ? "-" : String(Math.round(r));
+  const keyed = kind === "cross" || kind === "blank" || kind === "rotate" ? "-" : String(Math.round(r));
   const key = `${kind}|${keyed}|${color}`;
   const hit = CACHE.get(key);
   if (hit) return hit;
@@ -82,6 +82,41 @@ export function cursorUrl(kind: CursorKind, rPx: number, color: string): string 
     x.strokeStyle = "#000";
     x.lineWidth = 0.5;
     x.lineJoin = "miter";
+    x.stroke();
+  }
+  if (kind === "rotate") {
+    /* 旋转光标：环形箭头（约 300° 圆弧 + 末端小箭头），白芯 + 黑描边（与 cross 同一
+       可读性分工：深底靠白芯、浅底靠黑边）。给输入框的旋转手柄 hover 用。
+       弧先画黑粗线再叠白细线出"描边"效果；箭头三角贴在弧终点的切线方向上。 */
+    const rr = 8;
+    const a0 = -0.6;
+    const a1 = Math.PI * 1.55;
+    const drawArc = (w: number, col: string) => {
+      x.beginPath();
+      x.arc(m, m, rr, a0, a1);
+      x.strokeStyle = col;
+      x.lineWidth = w;
+      x.stroke();
+    };
+    drawArc(4.5, "#000");
+    drawArc(3, "#fff");
+    const ex = m + rr * Math.cos(a1);
+    const ey = m + rr * Math.sin(a1);
+    const tang = a1 + Math.PI / 2;
+    const nx = Math.cos(tang);
+    const ny = Math.sin(tang);
+    const px = Math.cos(tang + Math.PI / 2);
+    const py = Math.sin(tang + Math.PI / 2);
+    const head = 4.5;
+    x.beginPath();
+    x.moveTo(ex - px * head * 0.8, ey - py * head * 0.8);
+    x.lineTo(ex + nx * head * 0.9, ey + ny * head * 0.9);
+    x.lineTo(ex + px * head * 0.8, ey + py * head * 0.8);
+    x.closePath();
+    x.fillStyle = "#fff";
+    x.fill();
+    x.strokeStyle = "#000";
+    x.lineWidth = 0.6;
     x.stroke();
   } else if (kind === "dot") {
     // 记号笔：实心圆，半透明当前色 + 实边（与它涂出来的高亮同观感）

@@ -5,29 +5,65 @@
 //! ctrl.pendingTextValue 是控制器的普通字段，onChange 只写它、不 setState，所以每键不重渲染，
 //! 宽度只能在按键当下命令式改 DOM —— 别改成 useState，那会多出「组件 state」与「控制器字段」
 //! 两份真相，还要重新处理失焦提交与它的抢顺序。
+//!
+//! 手柄布局参照 Snipaste 录屏/截图：实线边框 + 四角手柄（左上/左下/右下 = 拉伸改字号，
+//! 右上 = 关闭）+ 顶心旋转手柄；**整体拖动只在框边 8px 抓取带上**（.snip-ti-ring，
+//! cursor:move），文本区是输入态——按下落插入符、I 梁光标（浏览器默认行为不拦）；
+//! 滚轮（中键滚轮）调字号，与画布 onWheel 的输入态分支同一入口 ctrl.bumpFont。
 
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, type PointerEvent as RPointerEvent } from "react";
 import { useSyncExternalStore } from "react";
 import type { OverlayController } from "../engine/controller";
+import { cursorUrl } from "../engine/cursorImage";
 import { measureTextWidth, textFontFamily } from "../../annotate/textMetrics";
 
+/** 旋转手柄的 hover 光标：环形箭头（cursorImage 生成，白芯黑边任何底可读），
+ *  CSS 没有原生 rotate 光标，grab 语义是"拖拽"而非"旋转" */
+const ROTATE_CURSOR = cursorUrl("rotate", 0, "#fff");
+
 /** 内容宽 → 边框宽的附加值。全局 `* { box-sizing: border-box }`，所以 = 右 padding 5
- *  + 左右各 1px 虚线边框 + 2 给末尾插入符和 italic 的右 overhang
+ *  + 左右各 1px 实线边框 + 2 给末尾插入符和 italic 的右 overhang
  *  （内容盒恰好等于字形 advance 时，光标压在盒右缘基本看不见）。
  *  **左 padding 必须仍是 0**：那是为了让"框左边缘=点击点=成品文字起点"（见 theme.css）。 */
 const PAD = 9;
 
-/** 空框时量占位符：既当默认宽度，也当**地板**（clamp 不能没有地板，见 fit 里那段） */
+/** 空框时量占位符：既当默认宽度，也作为**地板**（clamp 不能没有地板，见 fit 里那段） */
 const PLACEHOLDER = "输入";
+
+/** 角拉伸图标：NW-SE 双头对角箭头（对角线 = 角↔对角连线）。不用 Unicode ⤢/⤡——
+ *  那组字符在不同字体里渲染角度不可控（用户报"三个缩放图标角度错了"）；
+ *  BL 角的对角线是 NE-SW，把基准图标转 90° 即可 */
+function StretchIcon({ deg }: { deg: number }) {
+  return (
+    <svg width="10" height="10" viewBox="0 0 12 12" style={{ transform: `rotate(${deg}deg)` }} aria-hidden>
+      <path
+        d="M3 3 L9 9 M3 3 L3 5.5 M3 3 L5.5 3 M9 9 L9 6.5 M9 9 L6.5 9"
+        fill="none"
+        stroke="#fff"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/** 拖动的 8px 抓取带以框边线为中心（外 4 + 内 4），见 theme.css 的 .snip-ti-ring */
 
 export default function TextInput({ ctrl }: { ctrl: OverlayController }) {
   const s = useSyncExternalStore(ctrl.store.subscribe, ctrl.store.get);
   const inputRef = useRef<HTMLInputElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const at = s.pendingTextAt;
+  const rot = s.pendingTextRot;
   const info = ctrl.chromeInfo;
-  // 字号取整一次，DOM 与量宽共用：textFontCss 里对字号做了 Math.round，
-  // 若 DOM 仍按 150% 缩放下的 13.333px 排版，两边就系统性差 2.5%，长句末尾的字会被框裁掉
-  const fontPx = Math.round(Math.max(12, s.props.fontPx * info.cssScale));
+  /* DOM 字号直接 = props.fontPx：它本来就是 CSS px（FONT_SIZES 的约定），canvas 绘制端
+     按 fontPx × scale 物理落图，显示回来恰好就是 fontPx CSS px —— 两边在任何 dpr 下
+     都是同一物理字号，不需要也不允许再乘 cssScale。
+     旧式 round(fontPx × cssScale) 是把 CSS 值又除了一遍 dpr（cssScale = CSS/物理）：
+     150% 缩放下 18px 的字打字时只按 12px 排版，提交后 canvas 按 18px 落图，字号瞬间
+     放大 1.5 倍 —— 这才是"提交瞬间文字跳一下"的主成分；dpr=1 时两式巧合相等，
+     所以这个错在浏览器 mock 里从来测不出来。 */
+  const fontPx = s.props.fontPx;
 
   /** 按当前内容把框宽写进 DOM。一律**现读** ctrl.chromeInfo / ctrl.state：
    *  chromeInfo 是"上一帧的快照"（只在 draw() 末尾整体替换发布），闭包里的 info 更旧，
@@ -38,7 +74,7 @@ export default function TextInput({ ctrl }: { ctrl: OverlayController }) {
     if (!el || !st.pendingTextAt) return;
     const i = ctrl.chromeInfo;
     const p = st.props;
-    const f = Math.round(Math.max(12, p.fontPx * i.cssScale));
+    const f = p.fontPx; // CSS px，与 DOM fontSize 同值（见组件顶部注释）
     const o = { bold: p.textBold, italic: p.textItalic, family: p.textFamily };
     const text = ctrl.pendingTextValue || PLACEHOLDER;
     const floor = Math.ceil(measureTextWidth(PLACEHOLDER, f, o)) + PAD;
@@ -69,7 +105,9 @@ export default function TextInput({ ctrl }: { ctrl: OverlayController }) {
     // 它会按上一条的文字量宽、随后 value 才被清空，框宽永久停在上一条。
     fit();
     return () => cancelAnimationFrame(raf);
-  }, [at, ctrl]);
+    // 依赖是**会话 id 而不是 at**：拖动框体每次都生成新的 at 引用，认 at 的话
+    // 每挪一下这里就重跑、把已输入的内容清空（拖动后文字消失就是这个坑）
+  }, [s.pendingTextId, ctrl]);
 
   // 首帧绘制前就把宽度定下来（否则先闪一下浏览器的 20 字符固有宽），
   // 并覆盖"边打字边在属性栏改字号/粗体/斜体/字体"——那些改动会让组件因 store 变更重渲染，
@@ -84,32 +122,129 @@ export default function TextInput({ ctrl }: { ctrl: OverlayController }) {
     s.props.textFamily,
   ]);
 
+  /** 屏幕坐标下的未旋转盒角：wrapper 的 getBoundingClientRect 给的是旋转后 bbox，
+   *  拉伸比例的锚点必须落在**真角**上，所以用中心 + R(rot)·(±w/2, ±h/2) 反算。
+   *  旋转绕盒中心进行，中心在旋转前后不动 = bbox 中心。 */
+  const corner = (sx: 1 | -1, sy: 1 | -1) => {
+    const el = wrapRef.current;
+    if (!el) return { x: 0, y: 0 };
+    const r = el.getBoundingClientRect();
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    const co = Math.cos(rot);
+    const si = Math.sin(rot);
+    const dx = (sx * el.offsetWidth) / 2;
+    const dy = (sy * el.offsetHeight) / 2;
+    return { x: cx + dx * co - dy * si, y: cy + dx * si + dy * co };
+  };
+
+  /** 给手柄 span 挂"捕获期间的 move/up"：pointer capture 让事件继续打在手柄上，
+   *  拖出框外也不丢；preventDefault 保住 input 的焦点（手柄不该抢焦）。 */
+  const dragOn = (el: HTMLElement, move: (ev: PointerEvent) => void) => {
+    const up = () => {
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+  };
+
+  /** 角拉伸：以对角为锚，距离比 = 字号比（框高本就正比于字号，拉框即改字） */
+  const startStretch = (hx: 1 | -1, hy: 1 | -1) => (e: RPointerEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const el = e.currentTarget as HTMLElement;
+    el.setPointerCapture(e.pointerId);
+    const font0 = ctrl.state.props.fontPx;
+    const anchor = corner(-hx as 1 | -1, -hy as 1 | -1);
+    const d0 = Math.max(8, Math.hypot(e.clientX - anchor.x, e.clientY - anchor.y));
+    dragOn(el, (ev) => {
+      const d = Math.max(8, Math.hypot(ev.clientX - anchor.x, ev.clientY - anchor.y));
+      ctrl.setFontPx(font0 * (d / d0));
+    });
+  };
+
+  /** 顶心旋转手柄：指针绕盒中心的角度增量叠加到当前 rot */
+  const startRot = (e: RPointerEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const el = e.currentTarget as HTMLElement;
+    el.setPointerCapture(e.pointerId);
+    const r = wrapRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    const a0 = Math.atan2(e.clientY - cy, e.clientX - cx);
+    const rot0 = ctrl.state.pendingTextRot;
+    dragOn(el, (ev) => {
+      ctrl.setPendingTextRot(rot0 + Math.atan2(ev.clientY - cy, ev.clientX - cx) - a0);
+    });
+  };
+
+  /** **边缘带拖动**：只有框边（8px 抓取带）触发——文本区是输入态（按下落插入符，
+   *  交给浏览器默认行为），拖框必须站到边上。preventDefault 保住 input 的焦点
+   *  （ring 在 input 层叠之上，点它不该把焦点丢给 body）；增量按 cssScale 换物理 px。 */
+  const onRingPointerDown = (e: RPointerEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const el = inputRef.current;
+    if (el && document.activeElement !== el) el.focus({ preventScroll: true });
+    let lx = e.clientX;
+    let ly = e.clientY;
+    const move = (ev: PointerEvent) => {
+      const k = ctrl.chromeInfo.cssScale || 1;
+      ctrl.movePendingText((ev.clientX - lx) / k, (ev.clientY - ly) / k);
+      lx = ev.clientX;
+      ly = ev.clientY;
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
   if (!at) return null;
 
   const left = info.cssOrigin.x + at.x * info.cssScale;
   const top = info.cssOrigin.y + at.y * info.cssScale;
-  // 深色字配浅底、浅色字配深底：选中黑色时别让字在深半透明底上"隐身"
   const col = s.props.color;
-  const lum =
-    (0.299 * parseInt(col.slice(1, 3), 16) +
-      0.587 * parseInt(col.slice(3, 5), 16) +
-      0.114 * parseInt(col.slice(5, 7), 16)) /
-    255;
 
   return (
     /* 输入框**左上角落在点击点**：左边缘对齐靠 padding-left:0（见 theme.css），
        垂直方向靠 translateY(-50%) —— 浏览器的输入框把文字按内容盒垂直居中，
        所以框中心线 = 文字中线 = 点击点那条横线，I 梁光标与框、文字三者同在一条线上。
-       提交时 commitText 同样按半个字高补偿 at.y，成品文字才不会比打字时低半行。 */
+       提交时 commitText 按 fontBoundingBox 实测换算同一条中线（不是"半个字高"的
+       猜式），并补回 1px 边框的横向差，成品字形与打字时逐像素对齐、不跳位。
+       旋转：rotate 写在 translateY 之后、transform-origin 默认盒中心 —— 先绕中心转
+       再整体上移半高，中心仍落在点击点，手柄随框一起转。 */
     <div
+      ref={wrapRef}
       className="snip-textinput"
+      onWheel={(e) => {
+        // 滚轮（中键滚轮）在框上 = 调字号；画布那侧的输入态分支走同一入口
+        e.stopPropagation();
+        ctrl.bumpFont(e.deltaY < 0 ? 1 : -1);
+      }}
       style={{
         left: `${left}px`,
         top: `${top}px`,
         fontSize: `${fontPx}px`,
-        transform: "translateY(-50%)",
+        transform: `translateY(-50%)${rot ? ` rotate(${rot}rad)` : ""}`,
       }}
     >
+      {/* 拖动抓取带（四条，合围框边、中间透空）：只有这里触发整体拖动；
+          文本区归 input —— 按下落插入符是输入态。放在 input 之前渲染：
+          绝对定位层叠天然盖住普通流的 input，但又被后面的角手柄盖住 */}
+      <span className="snip-ti-ring snip-ti-ring-t" onPointerDown={onRingPointerDown} />
+      <span className="snip-ti-ring snip-ti-ring-b" onPointerDown={onRingPointerDown} />
+      <span className="snip-ti-ring snip-ti-ring-l" onPointerDown={onRingPointerDown} />
+      <span className="snip-ti-ring snip-ti-ring-r" onPointerDown={onRingPointerDown} />
       <input
         ref={inputRef}
         placeholder={PLACEHOLDER}
@@ -118,7 +253,8 @@ export default function TextInput({ ctrl }: { ctrl: OverlayController }) {
         // 输入期就按当前属性（颜色/粗细/斜体/删除线/字体/字号）渲染，和提交后的图形一致
         style={{
           color: col,
-          background: lum < 0.5 ? "rgba(255,255,255,0.88)" : "rgba(0,0,0,0.55)",
+          // 背景不设内联值：全透明基底在 theme.css（.snip-textinput input），
+          // 输入框只靠实线边框示意，打字时不遮挡底下的截图内容
           fontWeight: s.props.textBold ? 700 : 400,
           fontStyle: s.props.textItalic ? "italic" : "normal",
           textDecoration: s.props.textStrike ? "line-through" : "none",
@@ -147,6 +283,38 @@ export default function TextInput({ ctrl }: { ctrl: OverlayController }) {
           }
         }}
       />
+      {/* 四角手柄：左上/左下/右下拉伸（同时改字号），右上关闭（丢弃本条输入）。
+          拉伸图标自绘 SVG（NW-SE 双头对角箭头），不用 Unicode ⤢/⤡ —— 那组字符在
+          常见字体里渲染角度不可控；BL 角的对角线是 NE-SW，转 90° 得到 */}
+      <span className="snip-ti-h snip-ti-tl" title="拉伸（改字号）" onPointerDown={startStretch(-1, -1)}>
+        <StretchIcon deg={0} />
+      </span>
+      <span className="snip-ti-h snip-ti-bl" title="拉伸（改字号）" onPointerDown={startStretch(-1, 1)}>
+        <StretchIcon deg={90} />
+      </span>
+      <span className="snip-ti-h snip-ti-br" title="拉伸（改字号）" onPointerDown={startStretch(1, 1)}>
+        <StretchIcon deg={0} />
+      </span>
+      <span
+        className="snip-ti-h snip-ti-close"
+        title="关闭（丢弃本条输入）"
+        onPointerDown={(e) => {
+          if (e.button !== 0) return;
+          e.preventDefault();
+          e.stopPropagation();
+          ctrl.cancelText();
+        }}
+      >
+        ✕
+      </span>
+      <span
+        className="snip-ti-h snip-ti-rot"
+        title="旋转"
+        style={{ cursor: ROTATE_CURSOR }}
+        onPointerDown={startRot}
+      >
+        ⟳
+      </span>
     </div>
   );
 }

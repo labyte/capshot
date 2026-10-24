@@ -9,12 +9,14 @@ import { cursorUrl, MAX_CURSOR_RADIUS } from "./cursorImage";
 import { PixelReader } from "./pixelReader";
 import { makeScratch } from "../../annotate/mosaic";
 import { drawShapes } from "../../annotate/render";
-import { measureTextWidth } from "../../annotate/textMetrics";
+import { measureFontBox, measureTextWidth } from "../../annotate/textMetrics";
 import {
   applyShapeHandle,
   canEditShape,
   DEFAULT_PROPS,
   type DrawProps,
+  FONT_MAX,
+  FONT_MIN,
   type RectShape,
   shapeHandleDir,
   type Shape,
@@ -60,6 +62,11 @@ export interface OverlayState {
   canRedo: boolean;
   /** 文字输入态：非 null 时页面在 at 处显示输入框 */
   pendingTextAt: Point | null;
+  /** 输入框旋转角（弧度，绕盒中心）：提交时落进 text 图形的 rot */
+  pendingTextRot: number;
+  /** 输入会话 id：只在「开新一条输入」时递增。拖动框体只改 at 的坐标（换引用），
+      TextInput 的重置 effect 认这个 id 而不是 at —— 否则每挪一下输入内容就被清空 */
+  pendingTextId: number;
   busy: boolean;
   error: string | null;
 }
@@ -191,6 +198,8 @@ export class OverlayController {
       canUndo: false,
       canRedo: false,
       pendingTextAt: null,
+      pendingTextRot: 0,
+      pendingTextId: 0,
       busy: false,
       error: null,
     });
@@ -427,6 +436,17 @@ export class OverlayController {
     this.applyCursor(plan.css);
     const drawn = plan.drawn;
     const editable = this.editableShape();
+    /* 拖动中的橡皮擦矩形：只有「正在新画一条 erase rect」这一种情形给轮廓，
+       已定稿的 erase 仍完全隐形（hitShape 不认它，也没有虚线框）。 */
+    const anchor = this.anchor;
+    const draftShape =
+      s.phase === "tool-drawing" && anchor?.mode === "shape-new"
+        ? s.shapes.find((x) => x.id === anchor.id)
+        : undefined;
+    const draftEraseRect =
+      draftShape && draftShape.kind === "erase" && draftShape.mode === "rect"
+        ? draftShape.r ?? null
+        : null;
     if (!this.reader) {
       // 懒建：放大镜真要读像素才铺一张全幅 CPU 后端画布
       this.reader = new PixelReader(this.frame, this.frame.width, this.frame.height);
@@ -456,6 +476,7 @@ export class OverlayController {
       toolCursor: drawn && this.pointer
         ? { x: this.pointer.x, y: this.pointer.y, r: drawn.r, kind: drawn.kind }
         : null,
+      draftEraseRect,
     };
     paint(this.ctx, { w: this.layout.physW, h: this.layout.physH }, input);
     // 光标层单独叫：paint() 在取色/无选区时会提前返回，画在它里面会被整层跳过
@@ -786,7 +807,17 @@ export class OverlayController {
       return;
     }
     if (s.pendingTextAt) {
+      /* 点别处 = 结束上一条，并**立即在点处开下一条**（Snipaste 连续文字标注）。
+         以前这里提交完就 return，用户得再点一次才出新输入框。两次 store.set 在
+         同一事件里被 React 批处理，TextInput 的 <input> 节点会被复用 —— 清 value、
+         重新量宽、下一帧 refocus 都由它的 passive effect（deps=[at]）兜住。 */
       this.commitText();
+      this.store.set({
+        pendingTextAt: { ...p },
+        pendingTextRot: 0,
+        pendingTextId: this.state.pendingTextId + 1,
+      });
+      this.mark();
       return;
     }
     this.canvas.setPointerCapture(e.pointerId);
@@ -964,6 +995,13 @@ export class OverlayController {
        pointermove，不主动调 updateCursor 的话自绘十字会停在最后一帧上，
        与 chrome 自己的箭头/手型光标同时出现。 */
     this.updateCursor();
+    /* 还必须调度一次重绘：updateCursor 只写 style.cursor，而笔刷圈（橡皮圆头/
+       马赛克线条/超大记号笔）是画在画布位图上的，不重绘就赖在最后一帧。
+       clearHover() 在四个悬停态全空时提前 return 不 mark —— 开着绘制工具时
+       悬停态恰恰从不置位（updateHover 的图形悬停有 !s.tool 门槛），于是
+       「从下方移入工具条」整条路上没有任何一帧被调度，擦除圈不消失。
+       cursorPlan 对 !pointerIn 已返回 drawn:null，这里只差把那一帧画出来。 */
+    this.mark();
   };
 
   private onPointerUp = (e: PointerEvent) => {
@@ -996,6 +1034,11 @@ export class OverlayController {
 
   private onWheel = (e: WheelEvent) => {
     e.preventDefault();
+    // 文字输入态：滚轮 = 字号（与输入框拉伸手柄同一入口），不碰尺寸/吸附链那套
+    if (this.state.pendingTextAt) {
+      this.bumpFont(e.deltaY < 0 ? 1 : -1);
+      return;
+    }
     // 有工具 → 调该工具的尺寸；选中了已画图形 → 调那个图形；都没有 → 换吸附层级
     if (this.state.tool || this.state.selectedId !== null) this.bumpSize(e.deltaY < 0 ? 1 : -1);
     else if (!this.state.sel) this.cycleChain(e.deltaY > 0 ? 1 : -1);
@@ -1295,7 +1338,7 @@ export class OverlayController {
     ) {
       this.pushUndo();
       sh.kind = t;
-      this.store.set({ tool: t, selectedId: null, pendingTextAt: null });
+      this.store.set({ tool: t, selectedId: null, pendingTextAt: null, pendingTextRot: 0 });
       this.touchShapes();
       this.clearHover();
       this.updateCursor();
@@ -1303,7 +1346,7 @@ export class OverlayController {
       return;
     }
     // 切工具时丢弃未提交的文字输入（输入框随 pendingTextAt 一起消失）
-    this.store.set({ tool: t, selectedId: null, pendingTextAt: null });
+    this.store.set({ tool: t, selectedId: null, pendingTextAt: null, pendingTextRot: 0 });
     this.clearHover();
     // 切到别的工具 = 离开刚才那一支，句柄随之消失
     this.releaseEditHandles();
@@ -1466,7 +1509,11 @@ export class OverlayController {
     const kind = this.state.tool;
     if (!kind) return;
     if (kind === "text") {
-      this.store.set({ pendingTextAt: { ...p } });
+      this.store.set({
+        pendingTextAt: { ...p },
+        pendingTextRot: 0,
+        pendingTextId: this.state.pendingTextId + 1,
+      });
       this.mark();
       return;
     }
@@ -1634,16 +1681,30 @@ export class OverlayController {
     const at = this.state.pendingTextAt;
     const text = this.pendingTextValue?.trim();
     if (!at) return;
-    // 提交后保持文字工具激活：点别处=结束上一条，再点=直接开下一条（Snipaste 的连续标注）
+    // 提交后保持文字工具激活：点别处=结束上一条并当场开下一条（Snipaste 的连续标注，
+    // 入口在 onPointerDown 的 pendingTextAt 分支）
     if (text) {
       const sc = this.scale;
       const p = this.state.props;
       this.pushUndo();
-      /* 水平：输入框左边缘落在点击点、文字从框左边起排（.snip-textinput 的 padding-left:0），
-         所以 at.x 就是点击 x，不需要补偿。
-         垂直：输入框是 translateY(-50%) 居中于点击点的，而绘制端用 textBaseline:"top"
-         （at.y = em 盒顶），故这里上移半个字高，让成品文字的行中心也落在点击点 ——
-         否则回车提交后文字会往下跳半行。 */
+      /* 落点必须与「打字时看到的字形」逐像素对齐，否则提交瞬间文字会跳一下。
+         垂直（无头 Edge + PIL 像素标定过的公式；32px YaHei UI 实测 DOM 墨迹中心 =
+         盒中心 +3px、旧公式 canvas = −6px，差的 9px 就是用户看到的"结束后上移"）：
+         Chrome 输入框把**字体盒中心**放在内容盒中心 = 点击点，故 DOM 基线 =
+         点击点 + (ascent−descent)/2；而绘制端 textBaseline:"top" 的顶线到 alphabetic
+         的真实距离是 fb.top —— Chromium 的 top 线 ≠ alphabetic−ascent（32px 下
+         33 vs 24.39），见 measureFontBox 注释。换算得 顶线 y = 点击点 + (ascent−descent)/2 − top。
+         水平——1px 实线边框在内容盒外面，打字时字形起点 = 点击点 + 1 CSS px，
+         而 fillText 直接从 at.x 起笔，要补回这 1px（×scale 换成物理px）才不左移。 */
+      const fb = measureFontBox(p.fontPx * sc, {
+        bold: p.textBold,
+        italic: p.textItalic,
+        family: p.textFamily,
+      });
+      /* at 两轴都 round 到物理整像素：Blink 会把 DOM 行内文字的基线像素对齐
+         （snap），canvas 若留在浮点基线上，大字号时会出现半像素级的下坠感
+         （用户报"字体很大时提交后向下移一点"；dpr=1/1.5、16–96px 整/浮字号
+         逐档像素标定，公式系统差为 0±1px，残余差即来源此口径差）。 */
       this.store.set({
         shapes: [
           ...this.state.shapes,
@@ -1652,7 +1713,10 @@ export class OverlayController {
             kind: "text",
             color: p.color,
             width: 0,
-            at: { x: at.x, y: at.y - (p.fontPx * sc) / 2 },
+            at: {
+              x: Math.round(at.x + sc),
+              y: Math.round(at.y + (fb.ascent - fb.descent) / 2 - fb.top),
+            },
             text,
             fontPx: p.fontPx * sc,
             bg: p.textBg,
@@ -1660,12 +1724,14 @@ export class OverlayController {
             italic: p.textItalic,
             strike: p.textStrike,
             family: p.textFamily,
+            rot: this.state.pendingTextRot || undefined,
           },
         ],
         pendingTextAt: null,
+        pendingTextRot: 0,
       });
     } else {
-      this.store.set({ pendingTextAt: null });
+      this.store.set({ pendingTextAt: null, pendingTextRot: 0 });
     }
     this.pendingTextValue = "";
     this.mark();
@@ -1673,8 +1739,31 @@ export class OverlayController {
 
   cancelText(): void {
     this.pendingTextValue = "";
-    this.store.set({ pendingTextAt: null });
+    this.store.set({ pendingTextAt: null, pendingTextRot: 0 });
     this.mark();
+  }
+
+  /** 字号绝对值入口（输入框拉伸手柄 / 属性栏共用）：夹到 FONT_MIN..FONT_MAX，留两位小数 */
+  setFontPx(v: number): void {
+    const f = Math.round(clamp(v, FONT_MIN, FONT_MAX) * 100) / 100;
+    if (f !== this.state.props.fontPx) this.setProps({ fontPx: f });
+  }
+
+  /** 滚轮调字号：乘性步长 1.1，连续值（参照图属性栏就显示 13.71 这类小数） */
+  bumpFont(dir: number): void {
+    this.setFontPx(this.state.props.fontPx * (dir > 0 ? 1.1 : 1 / 1.1));
+  }
+
+  /** 输入框旋转手柄：写 pendingTextRot，提交时落进 text 图形的 rot */
+  setPendingTextRot(rot: number): void {
+    this.store.set({ pendingTextRot: rot });
+  }
+
+  /** 拖动输入框本体：增量是物理 px（调用方把 CSS 增量 ÷ cssScale 换好） */
+  movePendingText(dx: number, dy: number): void {
+    const at = this.state.pendingTextAt;
+    if (!at) return;
+    this.store.set({ pendingTextAt: { x: at.x + dx, y: at.y + dy } });
   }
 
   /** 由 TextInput 组件双向同步 */
@@ -1983,7 +2072,20 @@ function hitShape(s: Shape, p: Point, scale: number): boolean {
          命中区跟着一起扩，点底色边缘也算点中这支文字。 */
       const pad = s.bg ? 2 : 0;
       const w = Math.max(8, measureTextWidth(s.text, s.fontPx, s) + pad * 2);
-      return inRect({ x: s.at.x - pad, y: s.at.y, w, h: s.fontPx * 1.3 }, p);
+      let q = p;
+      if (s.rot) {
+        // 先把命中点绕盒中心反旋转（中心口径与 shapeBounds/render 三方一致），再按未旋转的盒测
+        const w0 = measureTextWidth(s.text, s.fontPx, s) + (s.bg ? 4 : 0);
+        const h0 = s.fontPx * 1.25;
+        const cx = s.at.x + w0 / 2;
+        const cy = s.at.y + h0 / 2;
+        const co = Math.cos(-s.rot);
+        const si = Math.sin(-s.rot);
+        const dx = p.x - cx;
+        const dy = p.y - cy;
+        q = { x: cx + dx * co - dy * si, y: cy + dx * si + dy * co };
+      }
+      return inRect({ x: s.at.x - pad, y: s.at.y, w, h: s.fontPx * 1.3 }, q);
     }
     case "step":
       return Math.hypot(p.x - s.at.x, p.y - s.at.y) <= s.radius + tol;

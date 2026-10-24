@@ -15,11 +15,12 @@ export interface TextFontOpts {
   family?: string;
 }
 
-/** canvas 的 ctx.font 用的完整 shorthand。**字号在这里取整**，所以 DOM 那边也必须
- *  用同一个已取整的值当 font-size，否则 150% 缩放下一边按 13px 量、一边按 13.333px 排版，
- *  系统性窄 2.5%，长句末尾的字会被框裁掉。 */
+/** canvas 的 ctx.font 用的完整 shorthand。**字号不再取整**：canvas 接受小数字号，
+ *  取整反而会在 1.25 这类分数 dpr 下与 DOM 差一档（18 CSS px = 22.5 物理，四舍五入
+ *  到 23 后成品比打字时大 ~2%）。DOM 侧（TextInput）直接用 CSS px 整数字号，绘制/量宽
+ *  两侧都走这一个函数拼字体串，同一 dpr 下天然同物理字号。 */
 export function textFontCss(fontPx: number, o: TextFontOpts): string {
-  return `${o.bold ? "bold " : ""}${o.italic ? "italic " : ""}${Math.round(fontPx)}px ${textFontFamily(o.family)}`;
+  return `${o.bold ? "bold " : ""}${o.italic ? "italic " : ""}${fontPx}px ${textFontFamily(o.family)}`;
 }
 
 /** 给 DOM 的 `style.fontFamily` 用的**纯 family list**（不含 bold/italic/字号——那三段
@@ -51,4 +52,42 @@ export function measureTextWidth(text: string, fontPx: number, o: TextFontOpts):
     _font = font;
   }
   return _ctx.measureText(text).width;
+}
+
+/** 字体盒度量（与传入 fontPx 同单位制）：
+ *  - ascent/descent = alphabetic 基线到字体盒顶/底（fontBoundingBox*）；
+ *  - **top** = 画布 textBaseline:"top" 的顶线到 alphabetic 基线的真实距离。
+ *    无头 Edge 像素标定（32px YaHei UI）：fA=33 而 T=24.39 —— Chromium 的 top 线
+ *    **不是** alphabetic−fA，把 T 当 fA 用会让提交后的文字系统性上移 fA−T
+ *    （32px 字上移 9px、18px 上移 ~5px，即用户报的"结束后文字上移"）。
+ *    T 可无像素解出：top 模式 measureText 的 fontBoundingBoxAscent = fA − T。
+ *  commitText 用三者把「Chrome 输入框居中的字体盒中心」换算成绘制端顶线 y。
+ *  拿不到 fontBoundingBox*（极老内核）才退回典型值。 */
+export function measureFontBox(
+  fontPx: number,
+  o: TextFontOpts,
+): { ascent: number; descent: number; top: number } {
+  const f = Math.round(fontPx);
+  const fallback = { ascent: f * 0.8, descent: f * 0.2, top: f * 0.6 };
+  if (!_ctx) {
+    const c = document.createElement("canvas");
+    _ctx = c.getContext("2d");
+  }
+  if (!_ctx) return fallback;
+  const font = textFontCss(fontPx, o);
+  if (font !== _font) {
+    _ctx.font = font;
+    _font = font;
+  }
+  _ctx.textBaseline = "alphabetic";
+  const m = _ctx.measureText("M");
+  const a = m.fontBoundingBoxAscent;
+  const d = m.fontBoundingBoxDescent;
+  if (typeof a !== "number" || typeof d !== "number" || !(a > 0) || d < 0) return fallback;
+  // top 模式：fontBoundingBoxAscent = 顶线到字体盒顶 = fA − T
+  _ctx.textBaseline = "top";
+  const topFBA = _ctx.measureText("M").fontBoundingBoxAscent;
+  _ctx.textBaseline = "alphabetic";
+  const top = typeof topFBA === "number" ? a - topFBA : fallback.top;
+  return { ascent: a, descent: d, top };
 }
