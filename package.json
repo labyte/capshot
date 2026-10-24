@@ -1,7 +1,7 @@
 {
   "name": "capshot",
   "private": true,
-  "version": "0.1.15",
+  "version": "0.1.16",
   "description": "CapsShot —— Tauri v2 截图工具（Rust workspace + ui/ 前端）",
   "scripts": {
     "tauri": "tauri",
