@@ -217,9 +217,20 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                 commands::trigger_capture(&tray.app_handle().clone());
             }
         })
-        .icon(app.default_window_icon().cloned().unwrap_or_else(|| {
-            tauri::image::Image::new(&[], 1, 1)
-        }))
+        /* 托盘图标走 default_window_icon()：Windows 上它不是 icons/icon.png，而是**运行时从 exe
+           的 PE 资源里读 32512(IDI_APPLICATION) 那枚图标**，取的是 32×32 这一档 —— 源文件是
+           icons/icon.ico，且必须 build script 真的重跑过才会是新的（见 build.rs 的 rerun-if-changed）。
+           取不到要**大声说**：原先静默退回 1×1 空图 = 托盘上一个隐形图标，"图标没烘进 exe"
+           这件事完全没有痕迹，排查时只会以为是图标画错了。 */
+        .icon(match app.default_window_icon() {
+            Some(ic) => ic.clone(),
+            None => {
+                log::error!(
+                    "exe 里没有 32512 图标资源（icons/icon.ico 未烘进 PE），托盘将不可见"
+                );
+                tauri::image::Image::new(&[], 1, 1)
+            }
+        })
         .build(app)?;
     Ok(())
 }

@@ -1,8 +1,13 @@
+# 只给 x86_64-pc-windows-gnu 用（早期移植 probe.exe 时留的）。本机与 CI 都没装 mingw 工具链，
+# 真要用得先装；release.yml 取 probe.exe 是 -ErrorAction SilentlyContinue，缺了不影响发布。
 [target.x86_64-pc-windows-gnu]
 linker = "x86_64-w64-mingw32-gcc"
 ar = "x86_64-w64-mingw32-ar"
 rustflags = ["-C", "target-feature=+crt-static"]
 
-[env]
-WINDRES = "x86_64-w64-mingw32-windres"
-RC = "x86_64-w64-mingw32-windres"
+# 这里**不要再放 [env] WINDRES / RC**：cargo 的 [env] 不分 target，
+# 原先那条 `RC = "x86_64-w64-mingw32-windres"` 会把 GNU 的资源编译器套到 MSVC 构建上，
+# 而这台机器根本没装它 —— `npm run tauri dev` 直接挂在 tauri-winres
+# （"Are you sure you have RC.EXE in your $PATH…"）。
+# MSVC 侧的 rc.exe 由 apps/desktop/build.rs 自动定位（与 CI「Locate rc.exe」同一规则）；
+# 确实要编 gnu 目标的话，自己在那次命令里带上 RC/WINDRES。

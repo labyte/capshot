@@ -21,10 +21,23 @@ Tauri v2 截图工具（对齐 Snipaste 交互），Rust workspace + Vite/React 
   `cargo build --release -p desktop --features custom-protocol`。
   不开 = dev 模式，前端不内嵌，运行时连 `http://localhost:1420`——
   在没有 vite dev server 的机器上表现为「一个错误网页」。
-- **Windows 编译需要 rc.exe**（tauri-winres 嵌入资源用）：
-  设 `RC` 环境变量指向 Windows SDK 的 `x64/rc.exe`
-  （`C:\Program Files (x86)\Windows Kits\10\bin\<版本>\x64\rc.exe`）。
-  CI 里由「Locate rc.exe」步骤自动定位。
+- **Windows 编译需要 rc.exe**（tauri-winres 嵌图标/manifest 资源用）：
+  **不用手设了** —— `apps/desktop/build.rs` 的 `ensure_rc()` 会自动定位
+  `%ProgramFiles(x86)%\Windows Kits\10\bin\<版本>\x64\rc.exe`，规则与 CI「Locate rc.exe」步骤
+  完全一致（路径倒序 = 最新 SDK 优先）。定位结果打在 build script 的 stdout
+  （`target/debug/build/desktop-*/output` 里的 `auto-located rc.exe: …`，或 `cargo build -vv`）。
+  仍可用 `RC` / `RC_<target>` 覆盖，但**得真能用**：值解析不到、或 MSVC 目标配了 GNU 的
+  `*windres`，build.rs 会打 warning 并改走自动定位（`.cargo/config.toml` 里那条 `[env] RC=…windres`
+  就是这么被绕开的 —— cargo 的 `[env]` 不分 target，会污染 MSVC 构建）。
+- **改了 `icons/` 必须让 build script 重跑**：tauri-build 自己只对 `tauri.conf.json` 与
+  `capabilities/` 发 `rerun-if-changed`，**不含 icons/**。build.rs 已补上这两条；
+  哪天新增图标文件（如 `icon.icns`）要一起补。图标是**编译期**烘进 exe 的 PE 资源（32512/IDI_APPLICATION），
+  Windows 上托盘的 `default_window_icon()` 运行时读的就是它（取 **32×32** 那一档，
+  `icons/icon.png` 在 Windows 这条路上根本不参与），所以 build script 不重跑 = 新图标永远看不见。
+  取证方法：`python -I scanexe.py <新ico> <旧ico> target/debug/capshot.exe`（按 ICO 帧字节逐个查命中）。
+- **`icon.ico` 里 16–128 必须是经典 BMP，只有 256 能用 PNG**：提交 `aaa01ea`
+  「rc.exe 拒绝 PNG-in-ICO（RC2176）」就是为此而改的，重画图标时别又导出成全 PNG
+  （已实测：同一个 ico 改回 BMP 容器，9 帧逐通道最大绝对差 = 0，纯容器变化、零像素代价）。
 - **前端必须先于 cargo 构建**：custom-protocol 是编译期把 `ui/dist` 打进二进制，
   改了 UI 代码要先 `npm run build`（在 `ui/`）再编 cargo。
 - 发布前检查：`cargo test --workspace`（11 项内核测试）+ `npm run typecheck` 都要绿。
@@ -60,8 +73,11 @@ cargo test --workspace
 3. **`beforeDevCommand` / `beforeBuildCommand` 写成 `npm --prefix ui run dev|build`**：
    显式指到 `ui/`，不受 CLI 的工作目录影响；而且根 `package.json` 里**不要放 `dev` 脚本**，
    否则旧的 `npm run dev` 形式会自己调自己。
-4. **Windows 仍要 `RC` 环境变量**指向 SDK 的 `x64/rc.exe`（CLI 内部照样跑 cargo，
-   tauri-build 嵌资源要 rc.exe）—— 与手工 `cargo build` 是同一个坑。
+4. **Windows 的 rc.exe 不用再管**（CLI 内部照样跑 cargo、照样要嵌资源）：
+   build.rs 会自动定位，见上面那条。历史上 `npm run tauri dev` 之所以挂在
+   `tauri-winres … Are you sure you have RC.EXE in your $PATH` 上，元凶是
+   `.cargo/config.toml` 里 `[env] RC = "x86_64-w64-mingw32-windres"`（GNU 专用、本机还没装），
+   现已删除该 `[env]` 并由 build.rs 兜底。
 
 `tauri dev` 编的是**不带 `custom-protocol`** 的 debug 二进制，运行时连 `http://localhost:1420`，
 所以 vite 必须在（CLI 的 `beforeDevCommand` 会自己起，端口被占就报 `Port 1420 is already in use`——
