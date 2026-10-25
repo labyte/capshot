@@ -118,6 +118,11 @@ jobs:
 
       # 发布二进制自检（规则里的「一眼判别法」）：没内嵌前端就别打包了，
       # 否则产物是一张开出来就报错网页的壳。放在 tauri build 之后 = 检的是真要发的那个。
+      #
+      # ⚠ 必须带 LC_ALL=C：macOS 的 BSD grep 在 UTF-8 locale 下啃 20MB 无换行的二进制会
+      # **静默失配**（实测：同一份 UI 产物，windows-latest 的 GNU grep 命中，macos-14 不命中；
+      # 把 v0.1.20 的 macOS 二进制拉下来用 Python 按字节搜，TextInput-DHGYpKV_.js 明明在，
+      # 命中 1 次）。C locale 下按单字节处理，GNU/BSD 行为一致，顺带更快。
       - name: Verify binary embeds UI (custom-protocol)
         shell: bash
         run: |
@@ -126,9 +131,17 @@ jobs:
           if [ ! -f "$BIN" ]; then
             echo "::error::$BIN 不存在（tauri build 没产出二进制？）"; exit 1
           fi
-          grep -a -q -E 'TextInput-[A-Za-z0-9_-]+\.js' "$BIN" \
-            || { echo "::error::$BIN 未内嵌前端（custom-protocol 没开？）"; exit 1; }
-          echo "自检通过：$BIN 已内嵌前端"
+          if LC_ALL=C grep -a -q -E 'TextInput-[A-Za-z0-9_-]+\.js' "$BIN"; then
+            echo "自检通过：$BIN 已内嵌前端（$(stat -c%s "$BIN" 2>/dev/null || stat -f%z "$BIN") bytes）"
+          else
+            echo "::error::$BIN 未内嵌前端（custom-protocol 没开？）"
+            # 失败时把证据打出来，省得再去翻日志猜是「真没内嵌」还是「grep 姿势不对」
+            echo "--- 二进制里命中的 assets/*.js ---"
+            LC_ALL=C grep -a -o -E 'assets/[A-Za-z0-9_.-]+\.js' "$BIN" | sort -u | head -20 || true
+            echo "--- 命中的 *.html ---"
+            LC_ALL=C grep -a -o -E '[a-z]+\.html' "$BIN" | sort -u | head -20 || true
+            exit 1
+          fi
 
       - name: Package artifacts (Windows)
         if: matrix.os == 'windows-latest'

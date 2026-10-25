@@ -139,6 +139,10 @@ cargo test --workspace
 > `cargo build -p desktop --features custom-protocol`。
 > 一眼判别法：`grep -a -o 'TextInput-[A-Za-z0-9_-]*\.js' target/debug/capshot.exe`
 > 有输出 = 内嵌版（独立可跑）；**空 = dev 版（必须配 vite）**。
+> **在 macOS 上必须加 `LC_ALL=C`**：BSD grep 在 UTF-8 locale 下啃几十 MB 无换行的
+> Mach-O 会**静默失配**（实测：同一份 UI 产物，windows-latest 的 GNU grep 命中、
+> macos-14 不命中；把 v0.1.20 的 mac 二进制拉下来按字节搜，`TextInput-DHGYpKV_.js`
+> 命中 1 次，说明东西在、是 grep 的姿势不对）。C locale 按单字节处理，两边行为一致。
 
 ## 推送 GitHub 走 VPN 代理
 

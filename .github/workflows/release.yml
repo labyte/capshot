@@ -124,6 +124,21 @@ jobs:
       - name: Tauri build (app + DMG)
         run: npm run tauri build -- --bundles dmg
       - run: cargo build --release -p capture-macos --example probe
+      # 与 ci.yml / build-windows 同一条自检。⚠ 必须带 LC_ALL=C：macOS 的 BSD grep 在
+      # UTF-8 locale 下啃 20MB 无换行的二进制会静默失配（已实测：同一份产物 GNU grep 命中、
+      # runner 上的 BSD grep 不命中；按字节搜 v0.1.20 的 mac 二进制，TextInput-*.js 明明在）。
+      - name: Verify binary embeds UI (custom-protocol)
+        shell: bash
+        run: |
+          BIN=target/release/capshot
+          if [ ! -f "$BIN" ]; then echo "::error::$BIN 不存在"; exit 1; fi
+          if LC_ALL=C grep -a -q -E 'TextInput-[A-Za-z0-9_-]+\.js' "$BIN"; then
+            echo "自检通过：$BIN 已内嵌前端"
+          else
+            echo "::error::$BIN 未内嵌前端（custom-protocol 没开？）"
+            LC_ALL=C grep -a -o -E 'assets/[A-Za-z0-9_.-]+\.js' "$BIN" | sort -u | head -20 || true
+            exit 1
+          fi
       - name: Bundle .app + zip + dmg
         run: |
           chmod +x scripts/make-app.sh
