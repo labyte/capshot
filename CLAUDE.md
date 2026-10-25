@@ -18,8 +18,12 @@ Tauri v2 截图工具（对齐 Snipaste 交互），Rust workspace + Vite/React 
   artifact 名（`capshot-win-x64` / `capshot-macos-arm64`）被 download-artifact 的
   `pattern: capshot-*` 匹配，不要动。
 
-## CI 构建产物规则（ci.yml，push main / PR 触发）
+## CI 构建产物规则（ci.yml，push main / PR / 手动 dispatch 触发）
 
+- **触发器有三个**：`push: branches:[main]`、`pull_request`、`workflow_dispatch`。想手动跑一次
+  构建就去 Actions → CI → 「Run workflow」选分支（或 `POST /repos/<owner>/<repo>/actions/
+  workflows/ci.yml/dispatches`，body `{"ref":"main"}`），**别再往 main 推空 commit**。
+  dispatch 时 `${GITHUB_SHA::7}` 是所选 ref 的 HEAD，产物命名与 push 触发完全一致。
 - **CI 也出安装版 + 免安装版**，与 release.yml 同形态、同清单，只是上传成 workflow artifact
   （不打 tag 就能从 Actions 页面下载当次构建，`retention-days: 14`）。
   免安装与安装版**分两个 artifact**（`capshot-ci-<plat>-portable-*` / `capshot-ci-win-x64-setup-*`、
