@@ -1,0 +1,4 @@
+# scripts/*.sh 要在 macOS runner 上直接执行（release.yml / ci.yml 里 `./scripts/make-app.sh`）。
+# 本仓库在 Windows 上编辑，core.autocrlf=true 时入库是 LF、没问题；但一旦有人把
+# autocrlf 关掉，CRLF 的 `#!/bin/sh\r` 会让 /bin/sh 直接找不到解释器。这里显式钉死。
+*.sh text eol=lf

@@ -9,6 +9,7 @@ fn main() {
     // icons 目录下新增文件（比如哪天补 icon.icns）要一起列进来。
     println!("cargo:rerun-if-changed=icons/icon.ico");
     println!("cargo:rerun-if-changed=icons/icon.png");
+    println!("cargo:rerun-if-changed=icons/icon.icns");
 
     ensure_rc();
 
