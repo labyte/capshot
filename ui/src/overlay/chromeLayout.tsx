@@ -55,18 +55,19 @@ export function layoutChrome(ctrl: OverlayController, refs: ChromeRefs) {
   // --- 放大镜 ---
   if (refs.loupe) {
     if (i.loupeVisible && i.pointer && i.color) {
-      const size = refs.loupe.offsetWidth || 170;
+      const w = refs.loupe.offsetWidth || 155;
+      const h = refs.loupe.offsetHeight || 152;
       const p = toCss(i.pointer);
       let left = p.left + 22;
       let top = p.top + 22;
-      if (left + size > i.winW - 4) left = p.left - size - 22;
-      if (top + size + 44 > i.winH - 4) top = p.top - size - 66;
+      if (left + w > i.winW - 4) left = p.left - w - 22;
+      if (top + h > i.winH - 4) top = p.top - h - 22;
       refs.loupe.style.left = px(Math.max(4, left));
       refs.loupe.style.top = px(Math.max(4, top));
       refs.loupe.style.display = "block";
       const frame = ctrl.frameImage;
       if (refs.loupeCanvas && frame) {
-        paintLoupe(refs.loupeCanvas, frame, i.pointer.x, i.pointer.y);
+        paintLoupe(refs.loupeCanvas, frame, i.pointer.x, i.pointer.y, i.color);
       }
       // 坐标行 (x , y)：虚拟屏绝对坐标，对齐 Snipaste 放大镜
       if (refs.loupeCoords && i.virtualPointer) {

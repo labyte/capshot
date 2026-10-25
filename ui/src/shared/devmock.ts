@@ -30,10 +30,13 @@ async function fakeFramePng(): Promise<ArrayBuffer> {
     g.beginPath(); g.moveTo(0, y); g.lineTo(cw, y); g.stroke();
   }
   const wins: SnapshotDto[] = fakeWindows();
+  const fills = ["#c9553d", "#3d76c9", "#3ba55d", "#e8ebf0"];
   wins.forEach((win, i) => {
-    g.fillStyle = ["#c9553d", "#3d76c9", "#3ba55d"][i % 3];
+    const fi = i % fills.length;
+    g.fillStyle = fills[fi];
     g.fillRect(win.x, win.y, win.width, win.height);
-    g.fillStyle = "#fff";
+    // 第 4 块是浅色窗：专门用来肉眼核对放大镜/描边在亮底上的对比色
+    g.fillStyle = fi === 3 ? "#20242b" : "#fff";
     g.font = `${16 * scale}px sans-serif`;
     g.fillText(`MockWindow ${i + 1}`, win.x + 12 * scale, win.y + 26 * scale);
   });
@@ -49,6 +52,7 @@ function fakeWindows(): SnapshotDto[] {
     { windowId: 1, title: "MockWindow 1", appName: "mock", bundleId: null, x: Math.floor(cw * 0.1), y: Math.floor(ch * 0.12), width: Math.floor(cw * 0.35), height: Math.floor(ch * 0.35) },
     { windowId: 2, title: "MockWindow 2", appName: "mock", bundleId: null, x: Math.floor(cw * 0.5), y: Math.floor(ch * 0.3), width: Math.floor(cw * 0.3), height: Math.floor(ch * 0.45) },
     { windowId: 3, title: "MockWindow 3", appName: "mock", bundleId: null, x: Math.floor(cw * 0.2), y: Math.floor(ch * 0.55), width: Math.floor(cw * 0.4), height: Math.floor(ch * 0.3) },
+    { windowId: 4, title: "MockWindow 4", appName: "mock", bundleId: null, x: Math.floor(cw * 0.62), y: Math.floor(ch * 0.08), width: Math.floor(cw * 0.3), height: Math.floor(ch * 0.18) },
   ];
 }
 

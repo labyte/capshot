@@ -31,7 +31,10 @@ export type ChromeBag = { current: ChromeRefs };
 
 export const px = (v: number) => `${Math.round(v)}px`;
 
-/** 放大镜取样半宽与每像素放大倍数（CSS px） */
-export const LOUPE_N = 8;
+/** 放大镜取样半径（源像素）与每像素放大倍数（CSS px）。
+ *  取样区是横长方形 17×11 像素 → 153×99（对齐参考图比例，不是正方形）。 */
+export const LOUPE_NX = 8;
+export const LOUPE_NY = 5;
 export const LOUPE_CELL = 9;
-export const LOUPE_SIZE = (LOUPE_N * 2 + 1) * LOUPE_CELL;
+export const LOUPE_W = (LOUPE_NX * 2 + 1) * LOUPE_CELL;
+export const LOUPE_H = (LOUPE_NY * 2 + 1) * LOUPE_CELL;

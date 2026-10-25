@@ -531,30 +531,34 @@ body.settings code {
 
 /* ---------- 放大镜 ---------- */
 
+/* 容器不带背景/边框/圆角：取样区画布自己画对比色描边，下挂的信息面板是
+   纯深灰块，两者同宽、紧贴（对齐参考图的深/浅两张底）。 */
 .snip-loupe {
   position: fixed;
   z-index: 55;
-  background: var(--bar-bg);
-  border: 1px solid var(--bar-border);
-  border-radius: var(--bar-radius);
-  padding: 5px;
+  padding: 0;
   pointer-events: none;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+  filter: drop-shadow(0 4px 14px rgba(0, 0, 0, 0.45));
 }
 
 .snip-loupe canvas {
   display: block;
   width: 153px;
-  height: 153px;
+  height: 99px;
   image-rendering: pixelated;
-  border-radius: 3px;
+}
+
+/* 信息面板：无圆角深灰块，与取样区同宽 */
+.snip-loupe-panel {
+  background: rgba(43, 43, 43, 0.96);
+  padding: 6px 10px 7px;
+  text-align: center;
 }
 
 /* 坐标行 (x , y)：居中，白字 */
 .snip-loupe-coords {
-  margin-top: 5px;
-  font: var(--label-font);
-  color: var(--bar-fg);
+  font: 13px/1.45 ui-monospace, "SFMono-Regular", Consolas, monospace;
+  color: #fff;
   text-align: center;
 }
 
@@ -563,28 +567,30 @@ body.settings code {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  margin-top: 3px;
-  font: var(--label-font);
+  gap: 8px;
+  margin-top: 4px;
+  font: 13px/1.45 ui-monospace, "SFMono-Regular", Consolas, monospace;
 }
 
 .snip-loupe-chip {
-  width: 12px;
-  height: 12px;
+  width: 13px;
+  height: 13px;
   border-radius: 2px;
-  border: 1px solid rgba(255, 255, 255, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.6);
   flex: none;
 }
 
-.snip-loupe-text { color: var(--bar-fg); white-space: nowrap; }
+.snip-loupe-text { color: #fff; white-space: nowrap; }
 
 .snip-loupe-hint {
-  margin-top: 2px;
-  font-size: 10px;
-  color: var(--bar-muted);
+  margin-top: 3px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.95);
   text-align: center;
   white-space: nowrap;
 }
+.snip-loupe-hint b { font-weight: 700; }
 
 /* ---------- 跟随光标的读数 ---------- */
 
