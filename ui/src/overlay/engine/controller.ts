@@ -1129,6 +1129,13 @@ export class OverlayController {
       this.mark();
       return;
     }
+    if (k === "Shift") {
+      // 取色阶段：单独按 Shift 切换放大镜 RGB/HEX 显示（对齐放大镜面板的提示文案）。
+      // 只认首次按下（!e.repeat），长按不会来回翻；Shift 作为其它组合键的修饰时，
+      // loupeFormat 只在放大镜可见时才被读取，切换无副作用。
+      if (!e.repeat) this.toggleLoupeFormat();
+      return;
+    }
     const lower = k.length === 1 ? k.toLowerCase() : k;
 
     // 1) 与修饰键无关的导航键
@@ -1190,10 +1197,10 @@ export class OverlayController {
       return;
     }
 
-    // 3) Shift+C 切颜色格式 / C 复制放大镜颜色
+    // 3) C：复制放大镜当前格式的颜色值（Shift 已单独切换 RGB/HEX），取色后直接退出
     if (lower === "c") {
       e.preventDefault();
-      void this.copyColor(e.shiftKey);
+      void this.copyColor();
       return;
     }
 
@@ -1830,19 +1837,38 @@ export class OverlayController {
 
   // ---------- 放大镜取色 ----------
 
-  private async copyColor(toHex: boolean): Promise<void> {
+  /** Shift 单独按下：在放大镜上切换 RGB ⇄ HEX 显示（下一帧 rAF 自动重画文本） */
+  private toggleLoupeFormat(): void {
+    this.store.set({ loupeFormat: this.state.loupeFormat === "hex" ? "rgb" : "hex" });
+    this.mark();
+  }
+
+  /**
+   * C：复制放大镜当前格式的色值，只写值本身——RGB 为「r, g, b」、HEX 为「#RRGGBB」，
+   * 与放大镜面板显示完全一致，不带 rgb() 包裹、不带任何多余文字。
+   * 纯取色（还没框选）时复制完直接退出截图状态。
+   */
+  private async copyColor(): Promise<void> {
     const p = this.pointer;
     if (!p || !this.reader) return;
-    const [r, g, b] = this.reader.at(p.x, p.y);
-    const text = toHex ? this.reader.hex(p.x, p.y) : `rgb(${r},${g},${b})`;
-    this.store.set({ loupeFormat: toHex ? "hex" : "rgb" });
+    const text =
+      this.state.loupeFormat === "hex"
+        ? this.reader.hex(p.x, p.y) // #181818（reader.hex 已是大写）
+        : this.reader.at(p.x, p.y).join(", "); // 20, 20, 20
     try {
       await navigator.clipboard.writeText(text);
-      this.store.set({ error: null });
     } catch {
-      // WebView2 剪贴板权限受限时，颜色至少显示在放大镜上
-      this.store.set({ error: "颜色已切换到 " + text });
+      // WebView2 剪贴板权限受限：色值仍显示在放大镜上，此时不退出，方便用户改走别的方式
+      this.store.set({ error: "复制失败，颜色为 " + text });
+      this.mark();
+      return;
     }
+    // 取色阶段（无选区）复制完直接退出截图；已在标注选区时保留现场，别吞掉标注成果
+    if (!this.state.sel) {
+      await this.cancel();
+      return;
+    }
+    this.store.set({ error: null });
     this.mark();
   }
 
