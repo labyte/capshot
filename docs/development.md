@@ -94,7 +94,7 @@ cargo run -p desktop --features custom-protocol
 - **CI**：push/PR 在 `windows-latest`（MSVC）与 `macos-14` 原生构建 + `cargo test`
   （`.github/workflows/ci.yml`），并**同时产出安装版与免安装版**上传为 workflow artifact
   （不用打 tag 就能从 Actions 页面下载当次构建试用，保留 14 天）。**Actions 页面上看到的是
-  artifact 名，不是包名**，两边不同名（实测 run #40 四个齐全）：
+  artifact 名，不是包名**，两边不同名（实测 run #40、#42 都是四个齐全）：
   | artifact 名（页面上点的） | 下载得到的文件 |
   |---|---|
   | `capshot-ci-win-x64-portable-<版本>-<sha>` | `capshot-win-x64-<版本>-<sha>.zip` |

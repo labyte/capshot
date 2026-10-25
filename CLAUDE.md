@@ -93,7 +93,7 @@ Tauri v2 截图工具（对齐 Snipaste 交互），Rust workspace + Vite/React 
 
 ```bash
 npm run tauri dev             # 一条命令起 vite + debug 应用（**必须在仓库根目录跑**，见下）
-npm run tauri build           # 走 CLI 打包（CI 不用它，发布仍走 cargo + custom-protocol）
+npm run tauri build           # **CI 与 release 都走它**（`-- --bundles nsis|dmg`），exe 与安装包同一次构建
 
 cd ui && npm run dev          # vite dev server :1420（tauri debug 构建连它）
 cd ui && npm run build        # 产出 ui/dist（多页，漏页会白屏）
