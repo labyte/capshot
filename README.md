@@ -1,108 +1,214 @@
-# capshot —— 跨平台截图软件（Windows 主 / macOS 次）
+# CapsShot 使用手册
 
-把千问 macOS 客户端“截屏提问”的截屏原理（z 序窗口枚举、系统壳过滤、两级抓取、too-small 回退、
-0.86 JPEG、权限 preflight、requestId 幂等）移植为通用截图工具。
-逆向依据：对 Qianwen.app v5.0.0.268（macOS）截屏层的静态分析记录（Swift `AppShotCaptureController`，核心参数均有反汇编佐证）。
+CapsShot 是一款轻量级跨平台截图 / 贴图工具（Windows 为主、macOS 为辅），交互对齐 Snipaste：
+截屏后在冻结画面上框选、标注、复制到剪贴板，或把选区“钉”在屏幕最上层随时参照。
+应用常驻系统托盘，没有主窗口，靠全局快捷键随手唤起。
 
-## 当前状态（里程碑）
+- **下载与安装** 见下
+- **开发者文档**（构建、CI、代码结构、路线图）见 [`docs/development.md`](docs/development.md)
 
-| 里程碑 | 状态 | 验证方式 |
+---
+
+## 目录
+
+- [下载与安装](#下载与安装)
+- [快速开始](#快速开始)
+- [默认快捷键](#默认快捷键)
+- [托盘菜单](#托盘菜单)
+- [截图](#截图)
+- [标注](#标注)
+- [贴图（钉图）](#贴图钉图)
+- [历史记录](#历史记录)
+- [设置](#设置)
+- [系统要求](#系统要求)
+- [常见问题](#常见问题)
+
+---
+
+## 下载与安装
+
+到 [GitHub Releases](https://github.com/labyte/capshot/releases) 下载对应平台的最新版本，每个版本提供四个附件：
+
+| 平台 | 免安装（绿色版） | 安装版 |
 |---|---|---|
-| M1 capture-core（types/trait/plan/coord/encode/filename） | ✅ 完成 | `cargo test --workspace` 11/11 绿（fixture 复刻参考判定案例） |
-| M2 capture-macos 后端 + probe | ✅ 完成 | `probe target` 与已验证的参考实现（同逻辑的 Swift 原型）对照：同窗口、`via=window`、物理坐标一致；CGWindowListCreateImage 经 core-graphics 声明链接 |
-| M3 capture-windows 代码（EnumWindows/DWM/WGC/BitBlt/PrintWindow + probe） | ✅ 编译完成 | `cargo check --target x86_64-pc-windows-msvc --examples` 0 error 0 warning；**真实抓取需 Windows 机器验收（M3 矩阵）** |
-| M0 脚手架（workspace+tauri v2+静态多页 UI） | ✅ 完成 | 双目标 `cargo check`；启动冒烟 3s 无 panic |
-| M4 壳层（托盘/全局热键/单实例/日志/设置/权限页/历史窗） | ✅ 代码完成 | 实机体验待用户验证（`cargo run -p desktop`） |
-| M5 overlay 冻结帧框选（吸附/放大镜/跨屏提交） | ✅ 代码完成 | 同上 |
-| M6 标注（矩形/箭头/文字/马赛克/撤销，前端渲染导出） | ✅ 基础版 | 同上 |
-| M7 钉图（滚轮缩放锚定/透明度/拖动/双击关） | ✅ 完成 | M11 已补齐穿透开关与右键菜单 |
-| M8 历史（SQLite+PNG+缩略图，复制/钉图/目录/删除/重编辑） | ✅ 完成 | editor 窗复用 overlay 引擎（`isEditor` 分支），导出另存为新条目 |
-| M9 打包 | ⏳ 未开始 | —— |
-| M11 交互层 Snipaste 化（React+Vite / 截图层 / 标注 / 贴图 / F1·F3） | ✅ 代码完成 | `cargo test --workspace` 11/11 仍绿（抓取内核零改动）；**手感待实机验收** |
+| Windows x64 | `capshot-win-x64-<版本>.zip` | `capshot-win-x64-<版本>-setup.exe`（NSIS 安装包） |
+| macOS (Apple Silicon) | `capshot-macos-arm64-<版本>.zip` | `capshot-macos-arm64-<版本>.dmg` |
 
-## 布局
+想要还没发 release 的 main 最新构建：去 [Actions](https://github.com/labyte/capshot/actions)
+最近一次 CI 运行页面底部的 artifact 下载，免安装与安装版分四个 artifact 上传（名字带
+`capshot-ci-` 前缀和 `<版本>-<sha>`，见 [`docs/development.md`](docs/development.md)）。
 
-```
-crates/capture-core     # 平台无关：契约 + 纯逻辑（全部可单测）
-crates/capture-macos    # CGWindowList* + 权限 + point↔physical 换算 + examples/probe
-crates/capture-windows  # EnumWindows/Dwm/WGC/BitBlt/PrintWindow + examples/probe（cfg 门控）
-ui/                     # Vite 多页 + React：六页各自入口，加页面要同时改 vite.config.js 的 input
-ui/src/annotate/        # 图形模型/绘制/命中/撤销栈/annotationJson v2（overlay、editor、贴图共用）
-ui/src/overlay/engine/  # 截图层命令式引擎：状态机 + rAF 画布 + 像素读取（React 只管浮层 chrome）
-ui/src/shared/theme.css # 单一样式表 + 视觉 token（按 body class 分透明/不透明作用域）
-```
+**Windows**
 
-坐标契约：**物理像素虚拟屏坐标**（左上原点、y 向下、负坐标合法）。窗口 z_index 前→后。
-`Frame` = RGBA8 stride 缓冲；编码 PNG 无损为主，JPEG 默认 **0.86**（参考常数），缩略图白底合成。
+- 免安装版：解压 zip，双击 `capshot.exe` 即可运行（目录内已附 `WebView2Loader.dll`）。
+- Win11 自带 WebView2 运行时；Win10 若未装过需先安装
+  [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。
 
-## 使用
+**macOS**
 
-```bash
-cargo test --workspace                                   # 纯逻辑
-cargo run -p capture-macos --example probe -- list --snap # macOS：吸附候选+有效矩形
-cargo run -p capture-macos --example probe -- target --out /tmp/t.jpg --jpeg
-cargo run -p capture-macos --example probe -- permission
-# Windows 上同形：
-cargo run -p capture-windows --example probe -- list --snap
-cargo run -p capture-windows --example probe -- window <hwnd> --out w.png
-cargo check --target x86_64-pc-windows-msvc -p capture-windows   # mac 上的类型验证
-```
+- 免安装版：解压后把 `capshot.app` 拖进「应用程序」。
+- 安装包与 zip **均未签名 / 未公证**，首次打开会有系统安全警告：
+  在「系统设置 → 隐私与安全性」里点「仍要打开」，或对 app 执行 `xattr -dr com.apple.quarantine`。
+- 首次截图会弹出**屏幕录制**授权（TCC），需在「系统设置 → 隐私与安全性 → 屏幕录制」勾选 CapsShot 后重启应用。
 
-## 已验证的行为对齐（macOS，与参考实现逐点比对）
+---
 
-- 前台普通窗（企业微信）→ `via=window`，帧 (0,66,3024,1718)px = 参考同窗
-- 菜单/控制中心浮层不作为默认目标（`best_snap_target` 优先 Normal）
-- 两级抓取：窗口图 too-small 自动落屏幕帧兜底；日志字面保留参考风格
-- `permission_denied` / `TargetNotFound` / `DegenerateGeometry` 错误语义
-- `CGDisplay::active_displays()` 在 CLI 进程间歇性为空 → 主屏兜底（已修复并 5/5 稳定复跑）
+## 快速开始
 
-## CI 与下载
+1. 启动 CapsShot，托盘出现图标（无主窗口，这是正常的）。
+2. 按 **F1** 截屏 → 画面冻结，鼠标悬停会自动高亮窗口。
+3. **单击**采纳整个高亮窗口，或**按下拖动**自由框选区域。
+4. 需要时在工具条上加标注（矩形 / 箭头 / 文字 / 马赛克等）。
+5. 完成后：
+   - **Enter / 双击 / Ctrl+C** 复制到剪贴板；
+   - **Ctrl+S** 另存为文件；
+   - **Ctrl+T / 鼠标中键** 把选区钉在屏幕上（贴图）。
+6. 按 **F3** 可把剪贴板里的图片直接贴到屏幕上；**Shift+F3** 隐藏 / 显示全部贴图。
 
-- CI：push/PR 在 `windows-latest`（MSVC）与 `macos-14` 原生构建 + `cargo test`（`.github/workflows/ci.yml`）
-- 发布：打 tag `v*` → Release 四个附件：免安装 `capshot-win-x64-<tag>.zip`（capshot.exe + probe.exe + WebView2Loader.dll）、
-  `capshot-macos-arm64-<tag>.zip`（capshot.app + probe）；安装版 `capshot-win-x64-<tag>-setup.exe`（NSIS）、
-  `capshot-macos-arm64-<tag>.dmg`（未签名/未公证，与 zip 同待遇，首跑有系统警告）
-- Windows 验收步骤见 `docs/testing-windows.md`
+> 重复启动 CapsShot 会静默退出（单实例），不会产生第二个托盘图标。
 
-## 运行
+---
 
-UI 是 Vite 多页工程（`ui/`）。**两种模式，别混：**
+## 默认快捷键
 
-```bash
-# A. 开发模式（HMR）—— 必须两个终端，缺一不可
-cd ui && npm install && npm run dev      # 终端 1：Vite 起在 127.0.0.1:1420
-cargo run -p desktop                     # 终端 2：托盘出现后截图
+| 快捷键 | 功能 |
+|---|---|
+| **F1** | 开始截图 |
+| **F3** | 贴图：把剪贴板图片钉到屏幕（剪贴板无图时复活最近关闭的一张贴图） |
+| **Shift+F3** | 隐藏 / 显示全部贴图 |
 
-# B. 单命令（吃已构建的前端产物，不需要 Vite）
-cd ui && npm run build
-cargo run -p desktop --features custom-protocol
-```
+以上键位可在[设置](#设置)中自定义。截图层与贴图窗内还有大量就地快捷键，见对应章节。
 
-为什么必须这样：`tauri` 的 `dev` cfg 等于 **`!custom_protocol`**（`tauri/build.rs:252`）。
-所以 `cargo run -p desktop` 属于 dev 模式，窗口加载 `tauri.conf.json` 里的 `build.devUrl`
-—— Vite 没起来就是白屏，不是代码坏了。反过来 `--features custom-protocol` 是**编译期**把
-`ui/dist` 打进二进制，dist 缺失会让 `generate_context!` 直接 panic（CI 因此必须先 `npm run build`）。
-`cargo test --workspace` / 不带该 feature 的 `cargo build` 都不需要 dist。
+---
 
-- Windows 上 `tauri-build` 需要 `rc.exe`（编图标资源）；命令行环境没带 MSVC 变量时显式指路：
-  `RC='C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\rc.exe' cargo test --workspace`
-  （CI 用 `ilammy/msvc-dev-cmd` + 同样的 `$RC` 解析）
-- macOS debug 二进制首次截图会触发屏幕录制授权弹窗（TCC 按二进制路径记录，重新构建后可能需要重勾）
-- 加新页面要同时改两处：`ui/<页>.html` **+** `ui/vite.config.js` 的 `rollupOptions.input`。
-  只加 html 不加 input，prod 构建会**静默不产出该页**，表现为该窗口白屏（CI 有逐页存在性检查兜住）
+## 托盘菜单
 
-## 与参考的已知差异（记录在案）
+右键托盘图标：
 
-- macOS `visible_bounds` = 全 bounds（菜单栏/Dock inset 待 Tauri 宿主用 NSScreen 细化）
-- 干净窗口抓取的 rect 入参用 CGRectNull（参考的全局常量真实值未取证）
-- Windows `SetIsBorderRequired` 仅 Win11 可关黄框；Win10 黄框不可避免（可注册表 DisableBorderForAll）
-- 混合 DPI 多屏换算为近似（单缩放假设）；列入 M3 手动矩阵
+- **截图** —— 等同 F1
+- **贴图（剪贴板）** —— 等同 F3
+- **隐藏 / 显示全部贴图** —— 等同 Shift+F3
+- **解除所有贴图穿透** —— 一键恢复所有开启了“鼠标穿透”的贴图
+- **关闭所有贴图**
+- **历史** —— 打开历史记录窗
+- **设置** —— 打开设置窗
 
-## 下一步
+---
 
-1. **交互层 Snipaste 化**（进行中，计划见 `~/.claude/plans/soft-percolating-mango.md`）：
-   阶段 0 React+Vite 地基 ✅ → 1 截图层手感 → 2 标注工具条/属性栏 → 3 贴图窗 → 4 重编辑 + F1/F3 → 5 视觉统一。
-   **抓取内核 `crates/capture-*` 全程零改动**（千问方案不变），改造只落在 `ui/` 与 `apps/desktop/`。
-2. **Windows 真机验收**：跑 `capture-windows` probe 矩阵（双屏异 DPI / cloaked / WGC→BitBlt 回退），再走全流程
-3. macOS 实机体验反馈修正（overlay 焦点、全屏 Space、权限引导文案）
-4. M9 打包（NSIS/MSI + DMG，签名/公证）与 M10 打磨：visible_bounds 细化（NSScreen）、本地时区命名
+## 截图
+
+按 F1 后屏幕冻结，在冻结帧上操作（窗口抓取走 z 序枚举 + 两级抓取，菜单 / 任务栏等系统壳不会被误选）：
+
+**选择区域**
+
+- 悬停高亮窗口；**单击**采纳整窗，**按下即拖**自由框选。
+- **Tab / 滚轮**：在光标下的命中链里切换层级（父子窗、边框内层）。
+- 拖框时选区左上角显示 `宽 × 高` 标签，并带像素放大镜。
+- 未框选时**双击**某窗口 = 抓取干净整窗图并直接复制。
+
+**键盘微调**
+
+- **WASD** 移动光标 1px；**方向键** 移动选区。
+- **Ctrl+方向键** 向外扩展、**Shift+方向键** 向内收缩；拖拽中**按住 Space** 转为整体移动选区。
+- **R** 恢复上次选区；**Ctrl+A** 全屏。
+
+**取色**
+
+- **Alt** 强制显示放大镜；**C** 复制当前颜色；**Shift+C** 在 RGB / HEX 间切换。
+
+**完成 / 取消**
+
+- **Enter / 双击 / Ctrl+C** 复制；**Ctrl+S / 保存按钮** 弹「另存为」（取消则留在截图层）。
+- **Ctrl+T / 中键** 贴图。
+- **右键**：标注中 = 结束当前图形；已定选区 = 退回重新决定；检测态再按 = 放弃截图。
+- **Esc** 取消截图。
+
+截图与导出的图片保存在 `%APPDATA%\app.capshot.desktop\history\`（macOS 为对应应用数据目录）。
+
+---
+
+## 标注
+
+选定区域后，工具条出现（图标悬停显示快捷键）。选工具后会出现**按工具定制的属性栏**：
+
+| 工具 | 快捷键 | 说明 |
+|---|---|---|
+| 形状（矩形 ⇄ 椭圆） | **V** | 描边 / 填充可切换（**F** 切换，或点填充按钮） |
+| 箭头 | **P** | 样式可选：无头 / 单箭头 / 双箭头 |
+| 画笔 | **L** | 自由手绘 |
+| 记号笔 | **M** | 半透明高亮，大小随线宽 |
+| 马赛克 | **X** | 像素化打码，粒度可调 |
+| 文字 | **T** | 支持粗体 / 斜体 / 删除线 / 字体 / 字号 |
+| 序号 | **N** | 自动递增的步骤标号 |
+| 橡皮擦 | **E** | 按区域擦除标注 |
+
+- **线宽 / 笔刷大小只能用滚轮调**：在绘图区滚动，或把鼠标停在线宽圆点上滚动。
+  线宽范围 1–16、橡皮半径 4–80、马赛克笔刷直径 8–80（各自独立）。
+- 色板为两行 × 10 共 20 色。
+- **撤销 / 重做**：Ctrl+Z / Ctrl+Y，工具条也有对应按钮。
+- 已画图形可再次点选：拖动、方向键微调、**Del** 删除；刚画完那一支还给缩放手柄
+  （矩形 / 椭圆 8 向缩放，箭头两端点，记号笔首末点）。
+
+---
+
+## 贴图（钉图）
+
+贴图把选区钉在屏幕最上层，始终置顶，适合对照参考。
+
+- 贴图出现在截图原位，与选区像素级对齐。
+- **滚轮** 缩放（光标锚定，带百分比气泡）；**Ctrl+滚轮** 调透明度；**中键** 复位。
+- **方向键** 微调 1px；**1 / 2** 旋转 ±90°；**3 / 4** 水平 / 垂直翻转；**+ / -** 缩放。
+- **Esc / Ctrl+W / 双击** 关闭；**Shift+Esc** 销毁；**Shift+双击** 缩略图模式。
+- **右键菜单**：恢复原始大小 / 放大 / 缩小 / 缩略图模式 / 不透明度(50·75·100%) /
+  灰度 / 反色 / 鼠标穿透 / 保持置顶 / 关闭 / 关闭所有贴图。
+- 开启**鼠标穿透**后该贴图收不到鼠标事件 —— 用托盘「解除所有贴图穿透」恢复。
+- 关掉贴图后再按 **F3**（剪贴板无图时）可复活最近关闭的一张。
+
+---
+
+## 历史记录
+
+从托盘菜单打开「历史」。历史以 SQLite + PNG + 缩略图保存，支持复制、钉图、打开所在目录、删除、重新编辑。
+
+- **双击条目** 进入重编辑器：可再次修改标注，导出时**另存为新条目**，原条目不变。
+
+---
+
+## 设置
+
+从托盘菜单打开「设置」。
+
+- **快捷键**：四个快捷键槽（截图 / 贴图 / 显隐贴图等）可分别改键。
+  F1–F12 / PrintScreen / Pause 可作裸键，其余键需搭配修饰键（Ctrl / Alt / Shift）。
+- 旧键位（如 Alt+Shift+A）会在首次启动时自动迁移到新的默认键（F1）。
+
+---
+
+## 系统要求
+
+- **Windows**：Windows 10 1809+ / Windows 11，x64；需 WebView2 运行时（Win11 自带）。
+- **macOS**：Apple Silicon（arm64）；需授予「屏幕录制」权限。
+
+---
+
+## 常见问题
+
+**Q：启动后没有窗口，只有一个托盘图标？**
+A：这是设计如此。CapsShot 常驻托盘、无主窗口，用 F1 截图、F3 贴图唤起功能。
+
+**Q：Windows 上截图 / 贴图窗口是白屏或显示错误网页？**
+A：多为缺少 WebView2 运行时（Win10）。安装
+[Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) 后重启应用。
+
+**Q：macOS 首次打开提示“无法验证开发者”？**
+A：安装包未签名 / 未公证。到「系统设置 → 隐私与安全性」点「仍要打开」，
+或对 app 执行 `xattr -dr com.apple.quarantine`。
+
+**Q：macOS 截图黑屏 / 抓不到内容？**
+A：需在「系统设置 → 隐私与安全性 → 屏幕录制」中勾选 CapsShot，然后重启应用。
+
+**Q：重复双击图标没有反应？**
+A：CapsShot 是单实例应用，已在运行时再次启动会静默退出，请直接用托盘图标或快捷键。
+
+**Q：某个贴图点不动、鼠标事件“穿透”过去了？**
+A：该贴图开启了鼠标穿透。用托盘菜单「解除所有贴图穿透」恢复。
