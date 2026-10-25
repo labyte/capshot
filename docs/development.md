@@ -108,8 +108,10 @@ cargo run -p desktop --features custom-protocol
   - 安装包由 **`npm run tauri build -- --bundles nsis|dmg`** 产出（**不是** `tauri bundle`：
     rust-cache 不缓存 workspace 自身的 crate，恢复缓存后 `desktop` 被认作 fresh、二进制不存在，
     只打包不编译的 `bundle` 会静默产出空产物，细节见 [`CLAUDE.md`](../CLAUDE.md)）。
-- ⚠ **ci.yml 只有 `push: branches:[main]` 和 `pull_request` 两个触发器，没有 `workflow_dispatch`**：
-  Actions 页面按不出「Run workflow」按钮，想手动跑一次构建只能往 main 推一个 commit（或开 PR）。
+- **手动触发**：ci.yml 带 `workflow_dispatch`，Actions → CI → 「Run workflow」选分支即可跑一次
+  （不用为了触发构建往 main 推空 commit）；命令行等价于
+  `POST /repos/<owner>/<repo>/actions/workflows/ci.yml/dispatches`，body `{"ref":"main"}`。
+  dispatch 时 `${GITHUB_SHA::7}` 是所选 ref 的 HEAD，所以产物命名与 push/PR 触发完全一致。
 - **发布**：仅 main 分支上的 `v*` tag 触发（release.yml 有 preflight 守卫）。打 tag → Release 四个附件：
   - 免安装 `capshot-win-x64-<tag>.zip`（capshot.exe + probe.exe + WebView2Loader.dll
     + README-test.md）

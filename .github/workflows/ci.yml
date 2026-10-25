@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # 手动触发：Actions → CI → 「Run workflow」选分支即可（不用为了跑一次构建往 main 推 commit）。
+  # 产物名里的 <sha> 取 ${GITHUB_SHA::7}，dispatch 时就是所选 ref 的 HEAD commit，
+  # 所以与 push/PR 触发的命名规则一致，不会撞名。
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
