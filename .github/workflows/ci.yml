@@ -60,7 +60,10 @@ jobs:
           done
       - name: Unit tests
         run: cargo test --workspace
-      - name: Release build (incl. desktop, MSVC/Xcode native)
+      # 只当「全 workspace + 两个 probe example 在 release 下能编过」的检查。
+      # ⚠ 别拿它当产物来源：rust-cache 不缓存 workspace 自己的 crate，恢复后 cargo 可能
+      # 判定 desktop 是 fresh 而跳过重链，target/release/capshot 压根不存在（见下面打包段的注释）。
+      - name: Release build check (workspace + examples compile)
         run: cargo build --release --workspace --examples --features desktop/custom-protocol
       - name: Clippy (report only)
         continue-on-error: true
@@ -68,8 +71,15 @@ jobs:
 
       # ── 产物：安装版（NSIS setup / DMG）+ 免安装 zip ──────────────────────────
       # 与 release.yml 同形态、同清单，差别只在文件名：CI 没有 tag，用 <version>-<shortsha>。
-      # 复用上面已经编好的 release 二进制 —— `tauri bundle` 只打包不重编（也不跑
-      # beforeBuildCommand），所以这里不存在第二次 cargo build。
+      #
+      # ⚠ 这里必须走 `tauri build`，**不能**用 `tauri bundle` 去复用上面 workspace 构建的二进制：
+      # `Swatinem/rust-cache@v2` 按设计不缓存 workspace 自己的 crate 产物（README:
+      # "the workspace crates themselves are not cached"），恢复缓存后
+      # `cargo build --release --workspace --examples` 会认为 desktop 是 fresh 而**跳过重链**，
+      # 结果 target/release/capshot 压根不存在（实测：整个 workspace 构建只花 3.75s，
+      # 只编了 capture-core/macos/windows 三个，没有 desktop）。`tauri build` 内部那次
+      # cargo 调用的 feature 组合不同、指纹不同，会真编 desktop 并在产物缺失时直接报错。
+      # 上面那条 workspace release 构建只当「全 workspace 能编过」的检查，别拿它当产物来源。
       - name: Resolve artifact names
         id: pkg
         shell: bash
@@ -87,9 +97,18 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "产物文件名前缀：capshot-$PLAT-$VERSION-$SHA"
 
-      # probe 必须按平台显式 -p 再编一次：两个后端 crate 的 example 同名 probe，
-      # `--workspace --examples` 会往同一个 target/release/examples/probe(.exe) 互相覆盖，
-      # 不重建就可能把另一平台的 probe 打进 zip（release.yml 也是这么做的）。
+      - name: Tauri build (exe + NSIS installer)
+        if: matrix.os == 'windows-latest'
+        run: npm run tauri build -- --bundles nsis
+      - name: Tauri build (app + DMG)
+        if: matrix.os == 'macos-14'
+        run: npm run tauri build -- --bundles dmg
+
+      # probe 必须按平台显式 -p 编：两个后端 crate 的 example 同名 probe，
+      # `--workspace --examples` 会往同一个 target/release/examples/probe(.exe) 互相覆盖
+      # （cargo 已在日志里警告 output filename collision，说以后可能变硬错误），
+      # 谁后编谁留下——不重建就可能把**另一平台的 probe** 打进 zip。
+      # 显式 -p 的指纹与 workspace 那次不同，是实打实的重编（实测 40s 全套依赖）。
       - name: Build probe (Windows)
         if: matrix.os == 'windows-latest'
         run: cargo build --release -p capture-windows --example probe
@@ -98,21 +117,18 @@ jobs:
         run: cargo build --release -p capture-macos --example probe
 
       # 发布二进制自检（规则里的「一眼判别法」）：没内嵌前端就别打包了，
-      # 否则产物是一张开出来就报错网页的壳
+      # 否则产物是一张开出来就报错网页的壳。放在 tauri build 之后 = 检的是真要发的那个。
       - name: Verify binary embeds UI (custom-protocol)
         shell: bash
         run: |
           BIN=target/release/capshot
           if [ "${{ matrix.os }}" = "windows-latest" ]; then BIN=target/release/capshot.exe; fi
+          if [ ! -f "$BIN" ]; then
+            echo "::error::$BIN 不存在（tauri build 没产出二进制？）"; exit 1
+          fi
           grep -a -q -E 'TextInput-[A-Za-z0-9_-]+\.js' "$BIN" \
             || { echo "::error::$BIN 未内嵌前端（custom-protocol 没开？）"; exit 1; }
-
-      - name: Bundle installer (NSIS)
-        if: matrix.os == 'windows-latest'
-        run: npm run tauri bundle -- --bundles nsis
-      - name: Bundle installer (DMG)
-        if: matrix.os == 'macos-14'
-        run: npm run tauri bundle -- --bundles dmg
+          echo "自检通过：$BIN 已内嵌前端"
 
       - name: Package artifacts (Windows)
         if: matrix.os == 'windows-latest'

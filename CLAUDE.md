@@ -27,16 +27,25 @@ Tauri v2 截图工具（对齐 Snipaste 交互），Rust workspace + Vite/React 
 - **CI 没有 tag，文件名用 `<version>-<shortsha>`**：version 读 `apps/desktop/tauri.conf.json`
   （`node -p`），sha 取 `${GITHUB_SHA::7}`，都在 `Resolve artifact names` 步骤里算成
   `steps.pkg.outputs.plat` / `.suffix`。改文件名只需改这一处 + 各平台 Package 步骤。
-- **打包用 `tauri bundle` 而不是 `tauri build`**：`bundle` 只打安装包、不重编，
-  直接复用前面 `cargo build --release --workspace --examples --features desktop/custom-protocol`
-  的产物，也不跑 `beforeBuildCommand`（UI 已由 `Build UI` 步骤产好）。
-  这里换成 `tauri build` 就是白编第二遍。
-- **probe 必须按平台显式 `-p` 再编一次**：`capture-windows` 与 `capture-macos` 的 example
+- **打包用 `tauri build`，不能用 `tauri bundle` 去复用 workspace 构建的产物**：
+  `Swatinem/rust-cache@v2` 按设计**不缓存 workspace 自己的 crate**（README 原话
+  "the workspace crates themselves are not cached"）。恢复缓存后
+  `cargo build --release --workspace --examples --features desktop/custom-protocol`
+  可能判定 desktop 是 fresh 而**跳过重链**，`target/release/capshot(.exe)` 压根不存在
+  —— 实测整个 workspace 构建只花 3.75s，只编了 capture-core/macos/windows 三个。
+  `tauri build` 内部那次 cargo 调用 feature 组合不同、指纹不同，会真编 desktop，
+  产物缺失时也会直接报错。所以那条 workspace release 构建**只当编译检查**，不是产物来源。
+  （`tauri bundle` 只打包不编译，在没有二进制时才会「静默无事发生」，别用。）
+- **probe 必须按平台显式 `-p` 编**：`capture-windows` 与 `capture-macos` 的 example
   同名 `probe`，`--workspace --examples` 会往同一个 `target/release/examples/probe(.exe)`
-  互相覆盖，谁后编谁留下——不重建就可能把**另一平台的 probe** 打进 zip。
-  release.yml 同理（它本来就是 `-p capture-<平台> --example probe`）。
+  互相覆盖（cargo 已警告 `output filename collision`，并说以后可能变硬错误），
+  谁后编谁留下——不重建就可能把**另一平台的 probe** 打进 zip。
+  显式 `-p capture-<平台> --example probe` 的指纹与 workspace 那次不同，是实打实的重编（实测 40s）。
+  release.yml 同理。
+- 挑 NSIS/DMG 产物**按 mtime 倒序取最新**，别用字母序 `First 1`：`target/release/bundle/`
+  不会自动清空，版本号不变时旧包留着，`0.1.20` 会排在 `0.1.21` 前面（本地实测踩到）。
 - 打包前先跑「一眼判别法」自检（`Verify binary embeds UI`）：没内嵌前端就直接失败，
-  别把开出来是错误网页的壳发出去。
+  别把开出来是错误网页的壳发出去。放在 `tauri build` 之后 = 检的是真要发的那个。
 
 ## 构建硬性约束（本地与 CI 一致）
 
@@ -61,6 +70,21 @@ Tauri v2 截图工具（对齐 Snipaste 交互），Rust workspace + Vite/React 
 - **`icon.ico` 里 16–128 必须是经典 BMP，只有 256 能用 PNG**：提交 `aaa01ea`
   「rc.exe 拒绝 PNG-in-ICO（RC2176）」就是为此而改的，重画图标时别又导出成全 PNG
   （已实测：同一个 ico 改回 BMP 容器，9 帧逐通道最大绝对差 = 0，纯容器变化、零像素代价）。
+- **macOS 打包必须有 `icons/icon.icns`**，且要列进 `tauri.conf.json` 的 `bundle.icon`。
+  缺了就是 `failed to bundle project: Failed to create app icon: 'No matching IconType'`
+  —— **v0.1.21 的 Release 就是这么挂的**（build-macos 失败 → release job 被 skip → 那次
+  一个附件都没发出去）。原因（读 `tauri-bundler/src/bundle/macos/icon.rs` 确证）：
+  `create_icns_file` 先看 icon 列表里有没有 `.icns`，**有就直接用**；没有才 fallback 去把
+  PNG 打成 ICNS，而 fallback 里我们那张 1024×1024 的 `icon.png`（文件名不带 `@2x`，
+  density=1）在 `icns::IconType::from_pixel_size_and_density(1024,1024,1)` 上**没有对应类型**
+  （1024 只作为 `ic10` = 512@2x 存在）→ 抛错。
+  补法：`npx tauri icon apps/desktop/icons/icon.png --output <临时目录>`，**只把生成的
+  `icon.icns` 拷进 `apps/desktop/icons/`**——别让它覆盖 `icon.ico`（tauri 导出的 ico 是全 PNG
+  帧，会重新触发 RC2176）。生成后核对一下 ico 仍是 8×BMP + 256×PNG。
+  `build.rs` 的 `rerun-if-changed` 已补 `icons/icon.icns`。
+- **`scripts/make-app.sh` 组装的免安装 `.app` 图标靠 `.icns` + `CFBundleIconFile`**：
+  光把 `icon.png` 扔进 `Contents/Resources/` 是不显示的（Finder/Dock 给通用图标）。
+  版本号也别再硬写，脚本现在从 `apps/desktop/tauri.conf.json` 里 sed 出来。
 - **前端必须先于 cargo 构建**：custom-protocol 是编译期把 `ui/dist` 打进二进制，
   改了 UI 代码要先 `npm run build`（在 `ui/`）再编 cargo。
 - 发布前检查：`cargo test --workspace`（11 项内核测试）+ `npm run typecheck` 都要绿。
