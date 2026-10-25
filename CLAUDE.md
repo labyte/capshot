@@ -18,6 +18,26 @@ Tauri v2 截图工具（对齐 Snipaste 交互），Rust workspace + Vite/React 
   artifact 名（`capshot-win-x64` / `capshot-macos-arm64`）被 download-artifact 的
   `pattern: capshot-*` 匹配，不要动。
 
+## CI 构建产物规则（ci.yml，push main / PR 触发）
+
+- **CI 也出安装版 + 免安装版**，与 release.yml 同形态、同清单，只是上传成 workflow artifact
+  （不打 tag 就能从 Actions 页面下载当次构建，`retention-days: 14`）。
+  免安装与安装版**分两个 artifact**（`capshot-ci-<plat>-portable-*` / `capshot-ci-win-x64-setup-*`、
+  `capshot-ci-macos-arm64-dmg-*`），想拿哪个下哪个，不用整包下载。
+- **CI 没有 tag，文件名用 `<version>-<shortsha>`**：version 读 `apps/desktop/tauri.conf.json`
+  （`node -p`），sha 取 `${GITHUB_SHA::7}`，都在 `Resolve artifact names` 步骤里算成
+  `steps.pkg.outputs.plat` / `.suffix`。改文件名只需改这一处 + 各平台 Package 步骤。
+- **打包用 `tauri bundle` 而不是 `tauri build`**：`bundle` 只打安装包、不重编，
+  直接复用前面 `cargo build --release --workspace --examples --features desktop/custom-protocol`
+  的产物，也不跑 `beforeBuildCommand`（UI 已由 `Build UI` 步骤产好）。
+  这里换成 `tauri build` 就是白编第二遍。
+- **probe 必须按平台显式 `-p` 再编一次**：`capture-windows` 与 `capture-macos` 的 example
+  同名 `probe`，`--workspace --examples` 会往同一个 `target/release/examples/probe(.exe)`
+  互相覆盖，谁后编谁留下——不重建就可能把**另一平台的 probe** 打进 zip。
+  release.yml 同理（它本来就是 `-p capture-<平台> --example probe`）。
+- 打包前先跑「一眼判别法」自检（`Verify binary embeds UI`）：没内嵌前端就直接失败，
+  别把开出来是错误网页的壳发出去。
+
 ## 构建硬性约束（本地与 CI 一致）
 
 - **release 二进制必须开 `custom-protocol`**：

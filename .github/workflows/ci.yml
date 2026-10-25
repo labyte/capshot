@@ -38,9 +38,14 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: ui/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            ui/package-lock.json
       - name: Install UI deps
         working-directory: ui
+        run: npm ci
+      # 根目录 CLI（tauri 只装在根 package.json）；下面 `tauri bundle` 打安装包要用
+      - name: Install root CLI deps
         run: npm ci
       - name: Typecheck UI
         working-directory: ui
@@ -60,3 +65,119 @@ jobs:
       - name: Clippy (report only)
         continue-on-error: true
         run: cargo clippy --workspace --all-targets
+
+      # ── 产物：安装版（NSIS setup / DMG）+ 免安装 zip ──────────────────────────
+      # 与 release.yml 同形态、同清单，差别只在文件名：CI 没有 tag，用 <version>-<shortsha>。
+      # 复用上面已经编好的 release 二进制 —— `tauri bundle` 只打包不重编（也不跑
+      # beforeBuildCommand），所以这里不存在第二次 cargo build。
+      - name: Resolve artifact names
+        id: pkg
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./apps/desktop/tauri.conf.json').version")
+          SHA=${GITHUB_SHA::7}
+          case "${{ matrix.os }}" in
+            windows-latest) PLAT=win-x64 ;;
+            macos-14)       PLAT=macos-arm64 ;;
+            *) echo "::error::未知 runner：${{ matrix.os }}"; exit 1 ;;
+          esac
+          {
+            echo "plat=$PLAT"
+            echo "suffix=$VERSION-$SHA"
+          } >> "$GITHUB_OUTPUT"
+          echo "产物文件名前缀：capshot-$PLAT-$VERSION-$SHA"
+
+      # probe 必须按平台显式 -p 再编一次：两个后端 crate 的 example 同名 probe，
+      # `--workspace --examples` 会往同一个 target/release/examples/probe(.exe) 互相覆盖，
+      # 不重建就可能把另一平台的 probe 打进 zip（release.yml 也是这么做的）。
+      - name: Build probe (Windows)
+        if: matrix.os == 'windows-latest'
+        run: cargo build --release -p capture-windows --example probe
+      - name: Build probe (macOS)
+        if: matrix.os == 'macos-14'
+        run: cargo build --release -p capture-macos --example probe
+
+      # 发布二进制自检（规则里的「一眼判别法」）：没内嵌前端就别打包了，
+      # 否则产物是一张开出来就报错网页的壳
+      - name: Verify binary embeds UI (custom-protocol)
+        shell: bash
+        run: |
+          BIN=target/release/capshot
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then BIN=target/release/capshot.exe; fi
+          grep -a -q -E 'TextInput-[A-Za-z0-9_-]+\.js' "$BIN" \
+            || { echo "::error::$BIN 未内嵌前端（custom-protocol 没开？）"; exit 1; }
+
+      - name: Bundle installer (NSIS)
+        if: matrix.os == 'windows-latest'
+        run: npm run tauri bundle -- --bundles nsis
+      - name: Bundle installer (DMG)
+        if: matrix.os == 'macos-14'
+        run: npm run tauri bundle -- --bundles dmg
+
+      - name: Package artifacts (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $sfx = "${{ steps.pkg.outputs.suffix }}"
+          # 免安装 zip：exe + probe + WebView2Loader.dll + 测试说明（与 release.yml 同一份清单）
+          Remove-Item -Recurse -Force pkg -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force pkg | Out-Null
+          Copy-Item target/release/capshot.exe pkg/
+          Copy-Item target/release/examples/probe.exe pkg/
+          Copy-Item tools/win-x64/WebView2Loader.dll pkg/
+          Copy-Item docs/testing-windows.md pkg/README-test.md
+          foreach ($f in 'capshot.exe','probe.exe','WebView2Loader.dll','README-test.md') {
+            if (-not (Test-Path "pkg/$f")) { Write-Error "pkg/$f 缺失，免安装包不完整"; exit 1 }
+          }
+          Compress-Archive -Path pkg/* -DestinationPath "capshot-win-x64-$sfx.zip"
+          # 安装版：NSIS 默认名 CapsShot_<ver>_x64-setup.exe，按约定改带版本+sha 的名。
+          # 按 mtime 倒序取最新——bundle 目录不清空，版本号不变时旧 setup.exe 会留着，
+          # 用字母序 First 1 会挑到旧的那个（本地实测踩过：0.1.20 排在 0.1.21 前面）。
+          $setup = Get-ChildItem target/release/bundle/nsis/*-setup.exe -ErrorAction SilentlyContinue |
+                   Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $setup) { Write-Error "NSIS 安装包未产出（target/release/bundle/nsis/）"; exit 1 }
+          Write-Host "picked installer: $($setup.Name)  $($setup.LastWriteTime)"
+          Copy-Item $setup.FullName "capshot-win-x64-$sfx-setup.exe"
+          Get-ChildItem "capshot-win-x64-$sfx*" | ForEach-Object { "{0}  {1:N0} bytes" -f $_.Name, $_.Length }
+
+      - name: Package artifacts (macOS)
+        if: matrix.os == 'macos-14'
+        run: |
+          SFX="${{ steps.pkg.outputs.suffix }}"
+          # 免安装 zip：capshot.app + probe + 测试说明（与 release.yml 同一份清单）
+          chmod +x scripts/make-app.sh
+          ./scripts/make-app.sh target/release/capshot dist/capshot.app
+          cp target/release/examples/probe dist/probe
+          zip -r "capshot-macos-arm64-$SFX.zip" dist/capshot.app dist/probe docs/testing-windows.md
+          # 安装版：DMG 默认名 CapsShot_<ver>_aarch64.dmg，按约定改带版本+sha 的名。
+          # ls -t = 按 mtime 倒序取最新，理由同 Windows 侧（bundle 目录不清空，别挑到旧的）
+          DMG=$(ls -t target/release/bundle/dmg/*_aarch64.dmg 2>/dev/null | head -1)
+          if [ -z "$DMG" ]; then echo "::error::DMG 未产出（target/release/bundle/dmg/）"; exit 1; fi
+          echo "picked installer: $DMG"
+          cp "$DMG" "capshot-macos-arm64-$SFX.dmg"
+          ls -l capshot-macos-arm64-"$SFX"*
+
+      # 免安装 / 安装版分两个 artifact： Actions 页面上想拿哪个下哪个，不用整包下载
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: capshot-ci-${{ steps.pkg.outputs.plat }}-portable-${{ steps.pkg.outputs.suffix }}
+          path: capshot-${{ steps.pkg.outputs.plat }}-${{ steps.pkg.outputs.suffix }}.zip
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload installer artifact (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: capshot-ci-win-x64-setup-${{ steps.pkg.outputs.suffix }}
+          path: capshot-win-x64-${{ steps.pkg.outputs.suffix }}-setup.exe
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload installer artifact (macOS)
+        if: matrix.os == 'macos-14'
+        uses: actions/upload-artifact@v4
+        with:
+          name: capshot-ci-macos-arm64-dmg-${{ steps.pkg.outputs.suffix }}
+          path: capshot-macos-arm64-${{ steps.pkg.outputs.suffix }}.dmg
+          if-no-files-found: error
+          retention-days: 14
