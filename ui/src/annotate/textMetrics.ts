@@ -54,6 +54,35 @@ export function measureTextWidth(text: string, fontPx: number, o: TextFontOpts):
   return _ctx.measureText(text).width;
 }
 
+/** 行高系数（×字号）。**四方唯一口径**：canvas 逐行推进（render.ts）、bounds（model.ts）、
+ *  命中框（controller.ts）、输入框的 `line-height`（TextInput）。任何一方自己写 1.2 或 1.5，
+ *  都会冒出「打字时行距与成品行距不一致」——输入框用 CSS px、绘制端用物理 px，
+ *  两边喂的字号本就差一个 scale，只有**系数**相同才能逐行对上。
+ *  单行时 `1 × 本系数 × 字号` 就是旧版各处写死的 `fontPx * 1.25`，行为不变。 */
+export const TEXT_LINE_H = 1.25;
+
+export interface TextBlock {
+  /** 按 `\n` 分出的各行（不做软换行：显示与绘制都以显式换行为准） */
+  lines: string[];
+  /** 与 lines 一一对应的行宽 */
+  widths: number[];
+  /** 最宽一行（不含 bg 外扩） */
+  w: number;
+  /** 整块高 = lineH × 行数 */
+  h: number;
+  lineH: number;
+}
+
+/** 多行文字块的度量。与 measureTextWidth 同一单位制约定：谁调用谁喂自己坐标系里的字号。 */
+export function measureTextBlock(text: string, fontPx: number, o: TextFontOpts): TextBlock {
+  const lines = text.split("\n");
+  const lineH = fontPx * TEXT_LINE_H;
+  const widths = lines.map((l) => measureTextWidth(l, fontPx, o));
+  let w = 0;
+  for (const x of widths) if (x > w) w = x;
+  return { lines, widths, w, h: lineH * lines.length, lineH };
+}
+
 /** 字体盒度量（与传入 fontPx 同单位制）：
  *  - ascent/descent = alphabetic 基线到字体盒顶/底（fontBoundingBox*）；
  *  - **top** = 画布 textBaseline:"top" 的顶线到 alphabetic 基线的真实距离。

@@ -478,7 +478,9 @@ dependencies = [
 name = "capture-windows"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "capture-core",
+ "image",
  "serde",
  "serde_json",
  "windows 0.61.3",

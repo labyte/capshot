@@ -36,5 +36,12 @@ windows = { version = "0.61", features = [
     "UI",
 ] }
 
+[dev-dependencies]
+image.workspace = true
+base64 = "0.22"
+
 [[example]]
 name = "probe"
+
+[[example]]
+name = "bench"

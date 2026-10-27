@@ -1,9 +1,14 @@
 //! 文字标注输入框。Ctrl+C 等全局键位在这里必须 stopPropagation，
 //! 否则输入 "copy" 会触发复制到剪贴板并退出截图（迁移前就是这个坑）。
 //!
+//! **Enter 换行、Ctrl+Enter 提交**（用户要求，Snipaste 同）：多行靠 <textarea> 的默认
+//! 换行行为，本组件只在 Ctrl+Enter 上 preventDefault 去 commitText；Escape 仍整框丢弃。
+//! 多行意味着宽要按**最宽一行**量、高要按**行数 × 行高**写死（行高系数 textMetrics.TEXT_LINE_H，
+//! 与绘制/命中框共用），详见 fit() 与两个盒模型常数（PAD / 上内边距+边框 = 3）。
+//!
 //! 宽度随内容伸缩（不再固定 140px / 20 字符固有宽）。注意**输入值不在 React 里**：
 //! ctrl.pendingTextValue 是控制器的普通字段，onChange 只写它、不 setState，所以每键不重渲染，
-//! 宽度只能在按键当下命令式改 DOM —— 别改成 useState，那会多出「组件 state」与「控制器字段」
+//! 宽度/高度只能在按键当下命令式改 DOM —— 别改成 useState，那会多出「组件 state」与「控制器字段」
 //! 两份真相，还要重新处理失焦提交与它的抢顺序。
 //!
 //! 手柄布局参照 Snipaste 录屏/截图：实线边框 + 四角手柄（左上/左下/右下 = 拉伸改字号，
@@ -15,7 +20,7 @@ import { useEffect, useLayoutEffect, useRef, type PointerEvent as RPointerEvent 
 import { useSyncExternalStore } from "react";
 import type { OverlayController } from "../engine/controller";
 import { cursorUrl } from "../engine/cursorImage";
-import { measureTextWidth, textFontFamily } from "../../annotate/textMetrics";
+import { measureTextWidth, TEXT_LINE_H, textFontFamily } from "../../annotate/textMetrics";
 
 /** 旋转手柄的 hover 光标：环形箭头（cursorImage 生成，白芯黑边任何底可读），
  *  CSS 没有原生 rotate 光标，grab 语义是"拖拽"而非"旋转" */
@@ -51,7 +56,7 @@ function StretchIcon({ deg }: { deg: number }) {
 
 export default function TextInput({ ctrl }: { ctrl: OverlayController }) {
   const s = useSyncExternalStore(ctrl.store.subscribe, ctrl.store.get);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const at = s.pendingTextAt;
   const rot = s.pendingTextRot;
@@ -65,9 +70,11 @@ export default function TextInput({ ctrl }: { ctrl: OverlayController }) {
      所以这个错在浏览器 mock 里从来测不出来。 */
   const fontPx = s.props.fontPx;
 
-  /** 按当前内容把框宽写进 DOM。一律**现读** ctrl.chromeInfo / ctrl.state：
+  /** 按当前内容把框宽/框高写进 DOM。一律**现读** ctrl.chromeInfo / ctrl.state：
    *  chromeInfo 是"上一帧的快照"（只在 draw() 末尾整体替换发布），闭包里的 info 更旧，
-   *  窗口在打字途中被缩小时混用两者会算出负上限。 */
+   *  窗口在打字途中被缩小时混用两者会算出负上限。
+   *  多行（Enter 换行）：宽取**最宽一行**、高 = 行数 × 行高（行高 = fontPx × TEXT_LINE_H，
+   *  与绘制端同一系数，见 textMetrics）。 */
   const fit = () => {
     const el = inputRef.current;
     const st = ctrl.state;
@@ -76,9 +83,10 @@ export default function TextInput({ ctrl }: { ctrl: OverlayController }) {
     const p = st.props;
     const f = p.fontPx; // CSS px，与 DOM fontSize 同值（见组件顶部注释）
     const o = { bold: p.textBold, italic: p.textItalic, family: p.textFamily };
-    const text = ctrl.pendingTextValue || PLACEHOLDER;
+    const lines = ctrl.pendingTextValue.split("\n");
+    const widths = lines.map((l) => measureTextWidth(l, f, o));
     const floor = Math.ceil(measureTextWidth(PLACEHOLDER, f, o)) + PAD;
-    const want = Math.ceil(measureTextWidth(text, f, o)) + PAD;
+    const want = Math.ceil(Math.max(0, ...widths)) + PAD;
     // 上限夹到**选区**右缘，不是窗口右缘：导出只取选区那块（render.ts 的 clip 语义），
     // 夹到窗口右缘的话，在选区右半边打长句会"提交后少半截字"
     const selRight = i.sel ? i.cssOrigin.x + (i.sel.x + i.sel.w) * i.cssScale : i.winW;
@@ -87,6 +95,11 @@ export default function TextInput({ ctrl }: { ctrl: OverlayController }) {
     // **地板必不可少**：紧贴选区右缘点字时 cap 是负数，而 `style.width = "-3px"` 会被 CSSOM
     // 静默丢弃（不报错），框塌回 size=1 的一字符宽，比固定宽度更糟——打中文全在框外滚动看不见
     el.style.width = `${Math.max(floor, cap > floor ? Math.min(want, cap) : floor)}px`;
+    /* 高度按行数写死（行数不靠 `rows` 属性算：rows→高度的换算各内核口径不同，
+        唯一可靠的是自己按 line-height 乘出来）。加 6 = 上下各 2px 内边距 + 1px 边框
+        （全局 border-box），与 theme.css 的 `.snip-textinput textarea` padding 一处对齐 ——
+        改那边必须回来改这里，否则框与文字会错位。 */
+    el.style.height = `${lines.length * f * TEXT_LINE_H + 6}px`;
   };
 
   useEffect(() => {
@@ -212,17 +225,23 @@ export default function TextInput({ ctrl }: { ctrl: OverlayController }) {
   if (!at) return null;
 
   const left = info.cssOrigin.x + at.x * info.cssScale;
-  const top = info.cssOrigin.y + at.y * info.cssScale;
+  /* 竖直锚点：**第一行的中线压在点击点那条横线上**（不是整框居中）。
+     多行时框只往下长，首行不动 —— 否则每按一次 Enter 整框就向上跳半行。
+     算式：内容盒顶 = 点击点 − 行高/2；再减去上边框 1 + 上内边距 2 才是盒顶
+     （那两个数与 theme.css 的 `.snip-textinput textarea` 一处对齐，改那边要回来改这里）。
+     提交端 commitText 的换算式仍按"首行字体盒中心 = 点击点"，所以第 k 行自然落在
+     `at.y + k × 行高`（行高系数 TEXT_LINE_H 三方共用），打字与成品逐行对齐。 */
+  const lineH = fontPx * TEXT_LINE_H;
+  const top = info.cssOrigin.y + at.y * info.cssScale - lineH / 2 - 3;
   const col = s.props.color;
 
   return (
     /* 输入框**左上角落在点击点**：左边缘对齐靠 padding-left:0（见 theme.css），
-       垂直方向靠 translateY(-50%) —— 浏览器的输入框把文字按内容盒垂直居中，
-       所以框中心线 = 文字中线 = 点击点那条横线，I 梁光标与框、文字三者同在一条线上。
+       竖直方向见上面 lineH/top 的算式（首行中线 = 点击点）。
        提交时 commitText 按 fontBoundingBox 实测换算同一条中线（不是"半个字高"的
        猜式），并补回 1px 边框的横向差，成品字形与打字时逐像素对齐、不跳位。
-       旋转：rotate 写在 translateY 之后、transform-origin 默认盒中心 —— 先绕中心转
-       再整体上移半高，中心仍落在点击点，手柄随框一起转。 */
+       旋转：transform-origin 默认盒中心 = 多行时整块的盒中心，与绘制端
+       （shapeBounds 的 at + (w/2, h/2)）同一中心，手柄随框一起转。 */
     <div
       ref={wrapRef}
       className="snip-textinput"
@@ -235,7 +254,9 @@ export default function TextInput({ ctrl }: { ctrl: OverlayController }) {
         left: `${left}px`,
         top: `${top}px`,
         fontSize: `${fontPx}px`,
-        transform: `translateY(-50%)${rot ? ` rotate(${rot}rad)` : ""}`,
+        // 行高必须与绘制端同系数（TEXT_LINE_H）：DOM 每行多高 = canvas 每行下移多少
+        lineHeight: `${lineH}px`,
+        transform: rot ? `rotate(${rot}rad)` : undefined,
       }}
     >
       {/* 拖动抓取带（四条，合围框边、中间透空）：只有这里触发整体拖动；
@@ -245,15 +266,21 @@ export default function TextInput({ ctrl }: { ctrl: OverlayController }) {
       <span className="snip-ti-ring snip-ti-ring-b" onPointerDown={onRingPointerDown} />
       <span className="snip-ti-ring snip-ti-ring-l" onPointerDown={onRingPointerDown} />
       <span className="snip-ti-ring snip-ti-ring-r" onPointerDown={onRingPointerDown} />
-      <input
+      <textarea
         ref={inputRef}
         placeholder={PLACEHOLDER}
         // 固有宽度从默认 20 字符降到 1 字符：万一 layout effect 晚一步，闪出来的是窄框不是宽框
-        size={1}
+        cols={1}
+        rows={1}
+        /* wrap="off"：**不做软换行**。行数只能由显式换行决定，浏览器再软折一行就与
+           canvas 画的行数对不上（高度、命中框全乱）。超宽的行走横向滚动，
+           与旧 <input> 的行为一致。 */
+        wrap="off"
+        spellCheck={false}
         // 输入期就按当前属性（颜色/粗细/斜体/删除线/字体/字号）渲染，和提交后的图形一致
         style={{
           color: col,
-          // 背景不设内联值：全透明基底在 theme.css（.snip-textinput input），
+          // 背景不设内联值：全透明基底在 theme.css（.snip-textinput textarea），
           // 输入框只靠实线边框示意，打字时不遮挡底下的截图内容
           fontWeight: s.props.textBold ? 700 : 400,
           fontStyle: s.props.textItalic ? "italic" : "normal",
@@ -270,13 +297,18 @@ export default function TextInput({ ctrl }: { ctrl: OverlayController }) {
         onKeyDown={(e) => {
           e.stopPropagation();
           // 中文输入法组合期间不认 Enter/Escape：Chromium 上"从候选栏选词"那记 Enter 的
-          // keydown 早于 compositionend 到达，isComposing 还是 true，不挡就会把拼音
-          // （"nihao"）直接落图；Esc 同理本该只收候选词，不挡会连已打的字整框销毁。
+          // keydown 早于 compositionend 到达，isComposing 还是 true，不拦会连 Ctrl+Enter
+          // 一起当提交；Esc 同理本该只收候选词，不拦会连已打的字整框销毁。
           // stopPropagation 必须留在这道守卫**前面**，否则组合期的键会穿透到全局键位。
           if (e.nativeEvent.isComposing) return;
+          /* **Enter = 换行**（用户要求，Snipaste 同）：交给 textarea 的默认行为，
+             不 preventDefault，onChange 会跟着重算宽高。提交改到 Ctrl+Enter，
+             另外点框外/切工具/导出前的快捷键也都会先 commitText（那条链路没变）。 */
           if (e.key === "Enter") {
-            e.preventDefault();
-            ctrl.commitText();
+            if (e.ctrlKey || e.metaKey) {
+              e.preventDefault();
+              ctrl.commitText();
+            }
           } else if (e.key === "Escape") {
             e.preventDefault();
             ctrl.cancelText();

@@ -2,7 +2,7 @@
 //! 坐标：绘制期为「本显示器物理 px」；导出时转成「选区相对 px」再序列化（见 serialize.ts）。
 
 import { handlePoints, resizeRect, type Handle, type Point, type Rect } from "../overlay/engine/types";
-import { measureTextWidth } from "./textMetrics";
+import { measureTextBlock } from "./textMetrics";
 
 export type ShapeKind =
   | "rect"
@@ -246,12 +246,15 @@ export function shapeBounds(s: Shape): Rect {
     case "text":
       /* 宽走真 measureText，不再用 `字数 × 字号 × 0.6` 猜：0.6 对汉字完全不成立
          （CJK advance ≈ 1.0 em），「你好世界」18px 实宽 ~72px 而猜出来只有 43px →
-         bounds 比画出来的墨迹短一大截，勾了底色（render.ts 往左右各扩 2px）更对不上。 */
-      const w = measureTextWidth(s.text, s.fontPx, s) + (s.bg ? 4 : 0);
-      const h = s.fontPx * 1.25;
+         bounds 比画出来的墨迹短一大截，勾了底色（render.ts 往左右各扩 2px）更对不上。
+         多行：宽取**最宽一行**、高取 行数 × 行高（行高系数 = textMetrics.TEXT_LINE_H，
+         与绘制/命中框/输入框同一口径）。单行时与改造前的 `1.25×字号` 完全相同。 */
+      const b = measureTextBlock(s.text, s.fontPx, s);
+      const w = b.w + (s.bg ? 4 : 0);
+      const h = b.h;
       if (!s.rot) return { x: s.at.x, y: s.at.y, w, h };
       /* 旋转包围盒：四角绕盒中心转 rot 取极值。中心口径与 render/hit 三方共用
-         （w 含 bg 外扩、h = 1.25×字号），改一处必须三处一起改 */
+         （w 含 bg 外扩、h = 行数 × 1.25×字号），改一处必须三处一起改 */
       const cx = s.at.x + w / 2;
       const cy = s.at.y + h / 2;
       const co = Math.cos(s.rot);

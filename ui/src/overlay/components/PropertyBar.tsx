@@ -15,6 +15,7 @@ import type { OverlayController } from "../engine/controller";
 import type { ChromeBag } from "./chrome";
 import { FONT_FAMILIES, FONT_SIZES, PALETTE, sizeDotPx } from "../../annotate/model";
 import { IconEllipse, IconRect } from "../../shared/icons";
+import ArrowStylePicker, { arrowStyleOf, arrowStyleProps } from "./ArrowStylePicker";
 
 // 圆点预览直径统一走 model.ts 的 sizeDotPx —— 与箭头/画笔光标的中心圆同一公式，
 // 两处永远同径（用户要求）。橡皮/马赛克用各自的 per 把 80 量级压回 20 以内。
@@ -85,7 +86,7 @@ export default function PropertyBar({
       onClickCapture={(e) => {
         if (!ctrl.state.pendingTextAt) return;
         if ((e.target as HTMLElement).tagName === "SELECT") return;
-        (document.querySelector(".snip-textinput input") as HTMLInputElement | null)?.focus();
+        (document.querySelector(".snip-textinput textarea") as HTMLTextAreaElement | null)?.focus();
       }}
     >
       <div className="snip-bar-row">
@@ -207,40 +208,16 @@ export default function PropertyBar({
           </>
         )}
 
-        {/* 箭头样式：单下拉四选项，纯符号无文字（楔形那档符号不可靠，给文字）。
+        {/* 箭头样式：自绘下拉四档（—/→/↔/楔形，两两同长同重）。
             四档 = 无头直线 / 实心三角单端 / 实心三角双端 / 楔形渐尖（参照图，
-            尾细头宽的整体填充多边形）。hollow 仍能被渲染，兼容历史数据，只是不再提供入口 */}
+            尾细头宽的整体填充多边形）。hollow 仍能被渲染，兼容历史数据，只是不再提供入口。
+            **为什么不是原生 select**：`<option>` 只能放文字，装不下图标 —— 楔形那档给不出
+            图形（用户要求「最后一项的文字换成图形，和其他三个一致」），详见 ArrowStylePicker */}
         {t === "arrow" && (
-          <select
-            className="snip-select snip-astyle"
-            title="箭头样式"
-            value={
-              p.arrowHead === "none"
-                ? "none"
-                : p.arrowHead === "tapered"
-                  ? "tapered"
-                  : p.arrowDouble
-                    ? "double"
-                    : "single"
-            }
-            onChange={(e) => {
-              const v = e.target.value;
-              ctrl.setProps(
-                v === "none"
-                  ? { arrowHead: "none", arrowDouble: false }
-                  : v === "double"
-                    ? { arrowHead: "solid", arrowDouble: true }
-                    : v === "tapered"
-                      ? { arrowHead: "tapered", arrowDouble: false }
-                      : { arrowHead: "solid", arrowDouble: false },
-              );
-            }}
-          >
-            <option value="none" title="无箭头直线">—</option>
-            <option value="single" title="单箭头（实心三角头）">→</option>
-            <option value="double" title="双箭头（实心三角头）">↔</option>
-            <option value="tapered" title="楔形渐尖箭头（尾细头宽、末端尖）">楔形</option>
-          </select>
+          <ArrowStylePicker
+            value={arrowStyleOf(p)}
+            onPick={(v) => ctrl.setProps(arrowStyleProps(v))}
+          />
         )}
 
         {/* 第二个子属性：矩形模式（对齐参考图的斜纹方块按钮）。

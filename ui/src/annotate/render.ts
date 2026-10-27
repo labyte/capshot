@@ -3,14 +3,13 @@
 import { drawBlocked, drawBlurred } from "./mosaic";
 import { shapeBounds } from "./model";
 import type { ArrowHead, EraseShape, Shape } from "./model";
-import { textFontCss, textFontFamily } from "./textMetrics";
+import { measureTextBlock, textFontCss, textFontFamily } from "./textMetrics";
 import type { Rect } from "../overlay/engine/types";
 
 export interface RenderDeps {
   /** 冻结帧源图，马赛克/模糊从这里取样 */
   source: CanvasImageSource;
   scale: number;
-  scratch: HTMLCanvasElement;
 }
 
 // 字体串与量宽统一在 textMetrics.ts（绘制 / 输入框 / 命中框三方共用同一口径），此处只 import。
@@ -83,27 +82,33 @@ export function drawShape(c: CanvasRenderingContext2D, s: Shape, deps: RenderDep
       c.save();
       c.font = textFontCss(s.fontPx, s);
       c.textBaseline = "top";
-      const m = c.measureText(s.text);
+      /* 多行：`\n` 分行，逐行按 lineH 下移。行高口径由 textMetrics.TEXT_LINE_H 统一，
+         与输入框的 line-height / bounds / 命中框同一系数，所以「打字时的行距」=「成品行距」。
+         单行时 b.h = 1.25×字号、只有 i=0 一趟，与逐行改造前的画法逐像素相同。 */
+      const b = measureTextBlock(s.text, s.fontPx, s);
       if (s.rot) {
         /* 绕盒中心旋转：中心口径与 shapeBounds / hitShape 三方共用
-           （w 含 bg 外扩、h = 1.25×字号），输入框旋转手柄的角度直接落在这里 */
-        const w = m.width + (s.bg ? 4 : 0);
-        const h = s.fontPx * 1.25;
+           （w 含 bg 外扩、h = 行数 × 1.25×字号），输入框旋转手柄的角度直接落在这里 */
+        const w = b.w + (s.bg ? 4 : 0);
         const cx = s.at.x + w / 2;
-        const cy = s.at.y + h / 2;
+        const cy = s.at.y + b.h / 2;
         c.translate(cx, cy);
         c.rotate(s.rot);
         c.translate(-cx, -cy);
       }
-      if (s.bg) {
-        c.fillStyle = "rgba(0,0,0,.45)";
-        c.fillRect(s.at.x - 2, s.at.y - 2, m.width + 4, s.fontPx + 4);
-      }
-      c.fillStyle = s.color;
-      c.fillText(s.text, s.at.x, s.at.y);
-      if (s.strike) {
-        // canvas 没有原生删除线：按字体度量手动画一道（基线 top，字面中部约 0.62em）
-        c.fillRect(s.at.x, s.at.y + s.fontPx * 0.62, m.width, Math.max(1, s.fontPx * 0.07));
+      for (let i = 0; i < b.lines.length; i++) {
+        const y = s.at.y + i * b.lineH;
+        const lw = b.widths[i];
+        if (s.bg) {
+          c.fillStyle = "rgba(0,0,0,.45)";
+          c.fillRect(s.at.x - 2, y - 2, lw + 4, s.fontPx + 4);
+        }
+        c.fillStyle = s.color;
+        c.fillText(b.lines[i], s.at.x, y);
+        if (s.strike) {
+          // canvas 没有原生删除线：按字体度量手动画一道（基线 top，字面中部约 0.62em）
+          c.fillRect(s.at.x, y + s.fontPx * 0.62, lw, Math.max(1, s.fontPx * 0.07));
+        }
       }
       c.restore();
       break;
@@ -122,7 +127,7 @@ export function drawShape(c: CanvasRenderingContext2D, s: Shape, deps: RenderDep
         bc.save();
         bc.translate(-b.x, -b.y);
         if (s.style === "blur") drawBlurred(bc, deps.source, b, s.level);
-        else drawBlocked(bc, deps.source, b, s.level, deps.scratch);
+        else drawBlocked(bc, deps.source, b, s.level);
         bc.restore();
         bc.save();
         bc.globalCompositeOperation = "destination-in";
@@ -148,7 +153,7 @@ export function drawShape(c: CanvasRenderingContext2D, s: Shape, deps: RenderDep
       }
       if (s.r.w < 1 || s.r.h < 1) break;
       if (s.style === "blur") drawBlurred(c, deps.source, s.r, s.level);
-      else drawBlocked(c, deps.source, s.r, s.level, deps.scratch);
+      else drawBlocked(c, deps.source, s.r, s.level);
       break;
     }
     case "step": {

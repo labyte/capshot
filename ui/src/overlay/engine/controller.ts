@@ -7,9 +7,8 @@ import { createStore } from "./store";
 import { paint, paintCursor, type PaintInput } from "./painter";
 import { cursorUrl, MAX_CURSOR_RADIUS } from "./cursorImage";
 import { PixelReader } from "./pixelReader";
-import { makeScratch } from "../../annotate/mosaic";
 import { drawShapes } from "../../annotate/render";
-import { measureFontBox, measureTextWidth } from "../../annotate/textMetrics";
+import { measureFontBox, measureTextBlock } from "../../annotate/textMetrics";
 import {
   applyShapeHandle,
   canEditShape,
@@ -137,7 +136,6 @@ export class OverlayController {
   private readonly ctx: CanvasRenderingContext2D;
   private frame: ImageBitmap | null = null;
   private reader: PixelReader | null = null;
-  private readonly scratch = makeScratch();
   private anchor: Anchor = null;
   private pointer: Point | null = null;
   /** 悬停反馈：光标正压着的手柄 / 光标下的已画图形（不进 store，只影响画布与光标） */
@@ -457,7 +455,7 @@ export class OverlayController {
       hover: s.hover,
       sel: s.sel,
       shapes: s.shapes,
-      deps: { source: this.frame, scale: this.scale, scratch: this.scratch },
+      deps: { source: this.frame, scale: this.scale },
       /* 选区的 8 向手柄**常驻**：切到绘图工具、甚至正在拖一笔，都照样显示照样抓
          （用户要求：随时可调截图选区）。重编辑里选区就是整幅图，画一圈手柄只是噪声。 */
       showHandles:
@@ -821,8 +819,8 @@ export class OverlayController {
       if (!isManip) {
         /* 点别处 = 结束上一条，并**立即在点处开下一条**（Snipaste 连续文字标注）。
            以前这里提交完就 return，用户得再点一次才出新输入框。两次 store.set 在
-           同一事件里被 React 批处理，TextInput 的 <input> 节点会被复用 —— 清 value、
-           重新量宽、下一帧 refocus 都由它的 passive effect（deps=[pendingTextId]）兜住。 */
+           同一事件里被 React 批处理，TextInput 的 <textarea> 节点会被复用 —— 清 value、
+           重新量宽高、下一帧 refocus 都由它的 passive effect（deps=[pendingTextId]）兜住。 */
         this.commitText();
         this.store.set({
           pendingTextAt: { ...p },
@@ -1714,10 +1712,13 @@ export class OverlayController {
       /* 落点必须与「打字时看到的字形」逐像素对齐，否则提交瞬间文字会跳一下。
          垂直（无头 Edge + PIL 像素标定过的公式；32px YaHei UI 实测 DOM 墨迹中心 =
          盒中心 +3px、旧公式 canvas = −6px，差的 9px 就是用户看到的"结束后上移"）：
-         Chrome 输入框把**字体盒中心**放在内容盒中心 = 点击点，故 DOM 基线 =
+         Chrome 把**字体盒中心**放在行盒中心 = 该行中线，而输入框把**首行**中线压在点击点
+         （TextInput 的 top 算式；多行只往下长，首行不动），故 DOM 首行基线 =
          点击点 + (ascent−descent)/2；而绘制端 textBaseline:"top" 的顶线到 alphabetic
          的真实距离是 fb.top —— Chromium 的 top 线 ≠ alphabetic−ascent（32px 下
          33 vs 24.39），见 measureFontBox 注释。换算得 顶线 y = 点击点 + (ascent−descent)/2 − top。
+         **多行不用再改**：这条式子给的是首行顶线，第 k 行由绘制端按 at.y + k×行高 推出，
+         行高系数三方共用（textMetrics.TEXT_LINE_H），所以每一行都对得上。
          水平——1px 实线边框在内容盒外面，打字时字形起点 = 点击点 + 1 CSS px，
          而 fillText 直接从 at.x 起笔，要补回这 1px（×scale 换成物理px）才不左移。 */
       const fb = measureFontBox(p.fontPx * sc, {
@@ -1967,7 +1968,7 @@ export class OverlayController {
       cc,
       this.state.shapes.map((s) => offsetCopy(s, -sel.x, -sel.y)),
       { x: 0, y: 0, w: sel.w, h: sel.h },
-      { source: src, scale: this.scale, scratch: makeScratch() },
+      { source: src, scale: this.scale },
     );
     const blob = await new Promise<Blob | null>((r) => c.toBlob(r, "image/png"));
     if (!blob) return null;
@@ -2112,23 +2113,26 @@ function hitShape(s: Shape, p: Point, scale: number): boolean {
     case "text": {
       /* 与 shapeBounds 同一口径走真 measureText（`字数 × 0.6` 对汉字窄一半：
          中文那一支只能抓到左半边）。勾了底色时墨迹往左右各多 2px（render.ts 的 bg 分支），
-         命中区跟着一起扩，点底色边缘也算点中这支文字。 */
+         命中区跟着一起扩，点底色边缘也算点中这支文字。
+         多行：宽 = 最宽一行、高 = 行数 × 行高（同一 measureTextBlock 口径），
+         单行仍取 `1.3×字号`（bounds 的 1.25 + 0.05 容差）不变。 */
       const pad = s.bg ? 2 : 0;
-      const w = Math.max(8, measureTextWidth(s.text, s.fontPx, s) + pad * 2);
+      const b = measureTextBlock(s.text, s.fontPx, s);
+      const w = Math.max(8, b.w + pad * 2);
+      const h = Math.max(s.fontPx * 1.3, b.h + s.fontPx * 0.05);
       let q = p;
       if (s.rot) {
         // 先把命中点绕盒中心反旋转（中心口径与 shapeBounds/render 三方一致），再按未旋转的盒测
-        const w0 = measureTextWidth(s.text, s.fontPx, s) + (s.bg ? 4 : 0);
-        const h0 = s.fontPx * 1.25;
+        const w0 = b.w + (s.bg ? 4 : 0);
         const cx = s.at.x + w0 / 2;
-        const cy = s.at.y + h0 / 2;
+        const cy = s.at.y + b.h / 2;
         const co = Math.cos(-s.rot);
         const si = Math.sin(-s.rot);
         const dx = p.x - cx;
         const dy = p.y - cy;
         q = { x: cx + dx * co - dy * si, y: cy + dx * si + dy * co };
       }
-      return inRect({ x: s.at.x - pad, y: s.at.y, w, h: s.fontPx * 1.3 }, q);
+      return inRect({ x: s.at.x - pad, y: s.at.y, w, h }, q);
     }
     case "step":
       return Math.hypot(p.x - s.at.x, p.y - s.at.y) <= s.radius + tol;

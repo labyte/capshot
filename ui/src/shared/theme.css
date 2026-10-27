@@ -445,7 +445,7 @@ body.settings code {
 /* 矩形模式开关：记号笔/橡皮擦/马赛克填充模式的第二个子属性，格宽与其它格一致 */
 .snip-rectbtn { width: var(--tb-cell); }
 
-/* 箭头样式下拉：符号加粗（—/→/↔ 线条更实），收紧内边距让选中项贴住框体、去掉大空隙 */
+/* 箭头样式下拉的样式在下面 `.snip-asel-wrap` 那段（自绘组件，不再是 .snip-astyle 的 select） */
 /* 马赛克大小滑块：贴合浅灰属性栏，细轨道 + 蓝色滑块头 */
 /* 粒度滑块：要"细" —— 3px 轨道 + 9px 圆头，自绘而非 UA 默认（默认控件粗、各平台还不一致）。
    光标沿用 bar 的统一规则（普通箭头），不恢复成手型。 */
@@ -478,16 +478,68 @@ body.settings code {
   box-shadow: 0 0 0 2px rgba(32, 128, 240, 0.4);
 }
 
-.snip-astyle {
-  width: 56px;
-  font-size: 16px;
-  font-weight: 700;
-  line-height: 1;
-  text-align: center;
-  text-align-last: center;
-  padding: 0 2px;
+/* 箭头样式下拉：**自绘**（不是原生 select）。原生 `<option>` 只能放文字，
+   四档里的「楔形渐尖」给不出图形（用户要求最后一项也换成图形、与其他三项一致），
+   所以收起态 = 当前档图标 + ▾、展开态 = 四行图标（名字走 title，纯图形与参照图一致）。
+   图标尺寸沿用 bar 的统一规则（`.snip-bar svg` = 18px），格高与邻格齐（--tb-cell） */
+.snip-asel-wrap { position: relative; display: inline-flex; }
+.snip-asel {
+  width: 48px;
+  height: var(--tb-cell);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  background: transparent;
+  color: var(--tb-ink);
+  border: 0;
+  /* 与 bar 内其余控件一致：普通箭头光标（手型只在设置页/历史页） */
+  cursor: default;
 }
-.snip-astyle option { font-weight: 700; font-size: 16px; }
+.snip-asel:hover,
+.snip-asel.open { background: var(--tb-hover); }
+/* ▾ 用 CSS 三角画：字形 ▾ 各字体基线不同，压在图标右边会歪 */
+.snip-asel .caret {
+  width: 0;
+  height: 0;
+  border-left: 3.5px solid transparent;
+  border-right: 3.5px solid transparent;
+  border-top: 3.5px solid currentColor;
+  /* 三角的重心偏上，往下 1px 才与图标中线齐 */
+  margin-top: 1px;
+}
+.snip-amenu {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 3px);
+  /* z-index 必须有：色块是 position:relative 的**后**邻元素，
+     auto 层叠下它会盖住先渲染的菜单（DOM 顺序占先） */
+  z-index: 3;
+  background: #fff;
+  border: 1px solid var(--tb-edge);
+  border-radius: 2px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+  padding: 2px 0;
+  display: flex;
+  flex-direction: column;
+}
+/* 工具栏贴着屏幕下缘时往上弹（ArrowStylePicker 量窗口高度决定） */
+.snip-amenu.up { top: auto; bottom: calc(100% + 3px); }
+.snip-amenu button {
+  width: 100%;
+  min-width: 46px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--tb-ink);
+  border: 0;
+  cursor: default;
+}
+.snip-amenu button:hover { background: var(--tb-hover); }
+/* 当前档：与 bar 里其它选中态同一套色（整格实心蓝 + 白图标） */
+.snip-amenu button.on { background: var(--tb-on-bg); color: var(--tb-on-fg); }
 
 .snip-chip {
   height: 24px;
@@ -647,7 +699,7 @@ body.settings code {
 
 .snip-textinput { position: fixed; z-index: 62; }
 
-.snip-textinput input {
+.snip-textinput textarea {
   font: inherit;
   color: #fff;
   /* 全透明底 + **黑白描边**（用户指定）：黑芯（border）+ 纯白晕（outline，不吃布局）。
@@ -659,13 +711,20 @@ body.settings code {
   /* 文本区是**输入态**：I 梁光标、按下落插入符（浏览器默认行为，不拦）；
      整体拖动只在框边抓取带上（.snip-ti-ring），见那里的注释 */
   cursor: text;
+  /* block：textarea 默认是 inline-block，行盒会在框底多垫一段基线下的空隙，
+     而框高是 fit() 按 `行数 × 行高 + 6` 写死的 —— 那空隙会让竖锚点整体偏 2–3px */
+  display: block;
+  /* 尺寸全由 fit() 量/算出来写进内联样式（宽按最宽一行、高按行数），
+     别在这里写 width/height/min-width，那会和它打架。
+     右下角的拖拽角、滚动条都要去掉：这是"打字预览框"，不是可调窗口 */
+  resize: none;
+  overflow: hidden;
   /* 左内边距给 0：输入框左边缘落在点击点，文字也要从框左边起排，
      否则插入符会比成品文字右移 6px（5 padding + 1 border），"打字位置"与"成品位置"对不上。
      剩下的 1px 左边框仍会把字形推离点击点 1 CSS px —— 这段差由 commitText 落定
-     at.x 时补回（见那里的水平/垂直对齐注释），提交前后字形不横跳 */
+     at.x 时补回（见那里的水平/垂直对齐注释），提交前后字形不横跳。
+     上下 2px 与行高一起决定竖锚点（TextInput 里 top 算式减的那个 3 = 1 边框 + 2 内边距）。 */
   padding: 2px 5px 2px 0;
-  /* 没有 min-width：宽度由 TextInput 的 fit() 按内容量出来给（随文字伸缩，
-     地板=占位符宽，上限=选区右缘）。写死在这里会在短字时又把框撑回一长条。 */
   /* 全局 user-select:none 会渗进输入框：打字没事，但框内选不了字 */
   user-select: text;
   -webkit-user-select: text;

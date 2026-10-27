@@ -70,6 +70,60 @@ export const IconArrow = (p: P) => (
   </Svg>
 );
 
+/* 箭头样式的四个图标（属性栏那个下拉）：四档 = 无头直线 / 实心三角单端 / 实心三角双端 /
+   楔形渐尖。**统一在 16 框里画 12 单位长的箭**（x 2→14、箭脊 y=8），四条同长同重，
+   切样式时肉眼只看到"头"变了；单/双的头是**实心三角**、与画布上真画的那个头同形，
+   楔形是单填充多边形（尾细头宽，照 render.ts 的 tapered 造型等比缩进 12 单位框）。
+   为什么要有这套图标：原生 `<option>` 只能放文字，`楔形` 那档用任何 Unicode 字形都表达不出来
+   （用户要求「最后一项的文字换成图形，和其他三个一致」）—— 所以那个下拉改自绘，见 ArrowStylePicker。 */
+/** 头长（尖到等腰三角的底）、头半高：单/双的实心三角头 */
+const AH_L = 3.2;
+const AH_H = 2.1;
+/** 单/双共用的实心三角头：`x` = 三角底所在横坐标，`dir` = 箭尖朝向（右 +1 / 左 -1） */
+const ArrowHeadIcon = ({ x, dir }: { x: number; dir: 1 | -1 }) => (
+  <path
+    d={`M${x + dir * AH_L} 8 L${x} ${8 - AH_H} L${x} ${8 + AH_H} Z`}
+    fill="currentColor"
+    stroke="none"
+  />
+);
+
+export const IconArrowNone = (p: P) => (
+  <Svg {...p}>
+    <path d="M2 8h12" />
+  </Svg>
+);
+
+export const IconArrowSingle = (p: P) => (
+  <Svg {...p}>
+    {/* 杆一路画到 12（伸进三角头里）：平头杆若停在头的底面 x=10.8，抗锯齿会在接缝上
+        留一道浅痕；伸进去那截被头盖住。与画布那套「杆缩到头部底面以内」同一处理 */}
+    <path d="M2 8h10" />
+    <ArrowHeadIcon x={14 - AH_L} dir={1} />
+  </Svg>
+);
+
+export const IconArrowDouble = (p: P) => (
+  <Svg {...p}>
+    <path d="M4 8h8" />
+    <ArrowHeadIcon x={14 - AH_L} dir={1} />
+    <ArrowHeadIcon x={2 + AH_L} dir={-1} />
+  </Svg>
+);
+
+export const IconArrowTapered = (p: P) => (
+  <Svg {...p}>
+    {/* 尾端收成一点 → 杆线性渐宽到头的底面 → 再让开一个实心三角头。
+        三处比例照画布那套：头/杆在底面处的半高比 = 2.1 / 0.7 = 3 (= 画布
+        「头宽 = 杆头宽 3 倍」)，头本身与单/双同长同高（12 单位里再按真比例画会糊） */}
+    <path
+      d={`M2 8 L${14 - AH_L} ${8 - 0.7} L${14 - AH_L} ${8 - AH_H} L14 8 L${14 - AH_L} ${8 + AH_H} L${14 - AH_L} ${8 + 0.7} Z`}
+      fill="currentColor"
+      stroke="none"
+    />
+  </Svg>
+);
+
 /** 画笔：铅笔造型（lucide pencil，校准缩放 0.85） */
 export const IconPen = (p: P) => (
   <Svg {...p} strokeWidth={1.56}>
