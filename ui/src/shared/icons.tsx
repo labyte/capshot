@@ -291,6 +291,13 @@ export const IconEdit = (p: P) => (
   </Svg>
 );
 
+/** 多选勾：只给历史卡片的选中角标用，1.9 线宽比工具图标更实，18px 下才看得清 */
+export const IconCheck = (p: P) => (
+  <Svg {...p} strokeWidth={1.9}>
+    <path d="M3.2 8.4 6.4 11.6 12.8 4.6" />
+  </Svg>
+);
+
 export const IconMore = (p: P) => (
   <Svg {...p}>
     <circle cx="3.5" cy="8" r="1" fill="currentColor" stroke="none" />

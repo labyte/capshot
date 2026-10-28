@@ -25,6 +25,9 @@ pub struct Settings {
     pub flash_ms: u64,
     pub autostart: bool,
     pub save_on_copy: bool,
+    /// 截图保存位置（导出「保存」落盘的目录）。空串 = 不固定，每次弹「另存为」询问。
+    /// 设置后保存直接落到该目录，重名自动加 -1/-2 序号，不再打断操作。
+    pub save_dir: String,
 }
 
 impl Default for Settings {
@@ -39,6 +42,7 @@ impl Default for Settings {
             flash_ms: 250, // 参考 appShotAnimationTotalDuration 未取证值，默认按其量级
             autostart: false,
             save_on_copy: false,
+            save_dir: String::new(),
         }
     }
 }

@@ -36,6 +36,7 @@ export default function SettingsPage() {
   const [perm, setPerm] = useState<PermissionStatusDto | null>(null);
   const [recording, setRecording] = useState<HotkeySlot | null>(null);
   const [hotkeyError, setHotkeyError] = useState<string>("");
+  const [saveDirError, setSaveDirError] = useState<string>("");
   const [regErrors, setRegErrors] = useState<string[]>([]);
   const keyHandlerRef = useRef<((e: KeyboardEvent) => void) | null>(null);
 
@@ -125,6 +126,37 @@ export default function SettingsPage() {
     if (r === "prompted") setTimeout(refreshPerm, 1500);
   }
 
+  /** 选一个文件夹作为截图保存位置。取消（null）直接忽略，不改动现有设置。 */
+  async function chooseSaveDir() {
+    setSaveDirError("");
+    try {
+      const dir = await invoke<string | null>("pick_save_dir");
+      if (!dir) return;
+      await patch({ saveDir: dir });
+    } catch (e) {
+      setSaveDirError("选择保存位置失败：" + String((e as Error)?.message ?? e));
+    }
+  }
+
+  /** 在文件管理器里打开已设置的保存目录；未设置时宿主会报错，这里就地显示 */
+  async function openSaveDir() {
+    setSaveDirError("");
+    try {
+      await invoke("open_save_dir");
+    } catch (e) {
+      setSaveDirError(String((e as Error)?.message ?? e));
+    }
+  }
+
+  async function openHistoryDir() {
+    setSaveDirError("");
+    try {
+      await invoke("open_history_dir");
+    } catch (e) {
+      setSaveDirError(String((e as Error)?.message ?? e));
+    }
+  }
+
   if (!settings) return <p className="hint">加载中…</p>;
 
   return (
@@ -180,6 +212,31 @@ export default function SettingsPage() {
         <div className="row">
           <span className="err">{hotkeyError}</span>
         </div>
+      </section>
+
+      <section>
+        <h2>保存位置</h2>
+        <div className="row">
+          <span className="hk-label">截图保存到</span>
+          <code className="path">{settings.saveDir || "未设置（每次保存时询问）"}</code>
+        </div>
+        <div className="row">
+          <button onClick={chooseSaveDir}>选择文件夹…</button>
+          {settings.saveDir && (
+            <>
+              <button onClick={openSaveDir}>打开文件夹</button>
+              <button onClick={() => void patch({ saveDir: "" })}>改为每次询问</button>
+            </>
+          )}
+        </div>
+        {saveDirError && <div className="err">{saveDirError}</div>}
+        <div className="row">
+          <button onClick={openHistoryDir}>打开历史原图目录</button>
+        </div>
+        <p className="hint-inline">
+          设置后截图「保存」直接落到该文件夹，文件名撞车自动加 -1 / -2 后缀，不再弹「另存为」；
+          不设置就每次都问。截图原图始终另存一份无损 PNG 到历史目录（「历史」窗可回看 / 重编辑）。
+        </p>
       </section>
 
       <section>

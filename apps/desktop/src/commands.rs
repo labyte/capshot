@@ -333,9 +333,12 @@ pub fn export_core(
     state: &AppState,
 ) -> Result<serde_json::Value, ApiError> {
     log::info!("export_result enter op={} sel={}", req.op, req.sel);
-    let sel = {
+    let (sel, base_png) = {
         let mut g = state.selections.lock().unwrap();
         let s = g.get_mut(&req.sel).ok_or(ApiError { code: "target_not_found", message: "sel gone".into() })?;
+        // 叠标注之前先留一份底图：历史里成品图与底图要分开存，
+        // 重编辑从底图重画图形，成品图只给缩略图/复制/贴图用（见 history_edit）。
+        let base_png = s.png.clone();
         if let Some(b64) = &req.png_base64 {
             let bytes = base64_decode(b64).ok_or(ApiError { code: "degenerate_geometry", message: "bad png b64".into() })?;
             s.png = bytes;
@@ -345,22 +348,23 @@ pub fn export_core(
         if req.annotation_json.is_some() {
             s.annotation = req.annotation_json.clone();
         }
-        Sel {
+        let sel = Sel {
             frame: s.frame.clone(),
             rect: s.rect,
             png: s.png.clone(),
             source: s.source.clone(),
             app_hint: s.app_hint.clone(),
             annotation: s.annotation.clone(),
-        }
+        };
+        (sel, base_png)
     };
 
     let mut result = serde_json::json!({ "op": req.op });
 
-    // 保存：先弹「另存为」让用户选位置，而不是直接落到默认历史目录。
-    // 取消 → 整次保存作废（不写历史、不关截图层），用户可继续标注或改走复制。
+    // 保存目标位置：设置里配了「截图保存位置」就直接落盘（不动手打断操作），
+    // 没配才弹「另存为」让用户选。取消 → 整次保存作废（不写历史、不关截图层）。
     let save_target = if req.op == "save" || req.op == "copySave" {
-        match pick_save_path(app, parent) {
+        match resolve_save_path(app, parent, state) {
             Some(p) => Some(p),
             None => {
                 log::info!("export_result save cancelled");
@@ -380,7 +384,7 @@ pub fn export_core(
     let seq = { state.history.lock().unwrap().day_seq(&day) + 1 };
     let id = {
         let h = state.history.lock().unwrap();
-        h.insert(&sel.png, &thumb, &sel.rect, &sel.source, sel.app_hint.as_deref(), req.annotation_json.as_deref(), seq, sel.app_hint.as_deref().unwrap_or("capture"))
+        h.insert(&sel.png, &base_png, &thumb, &sel.rect, &sel.source, sel.app_hint.as_deref(), req.annotation_json.as_deref(), seq, sel.app_hint.as_deref().unwrap_or("capture"))
             .map_err(|e| ApiError { code: "save_failed", message: e })?
     };
     result["id"] = serde_json::json!(id);
@@ -395,16 +399,7 @@ pub fn export_core(
             .map_err(|e| ApiError { code: "save_failed", message: e.to_string() })?;
         result["path"] = serde_json::json!(target.display().to_string());
         // 保存成功的可见反馈（此前"存图无效"实为静默成功）
-        use tauri_plugin_notification::NotificationExt;
-        if let Err(e) = app
-            .notification()
-            .builder()
-            .title("CapsShot 已保存")
-            .body(target.display().to_string())
-            .show()
-        {
-            log::warn!("save notification failed: {e}");
-        }
+        notify(app, "CapsShot 已保存", &target.display().to_string());
     }
     if req.op == "pin" {
         match windows::open_pin(app, req.sel, &sel.rect) {
@@ -421,6 +416,30 @@ pub fn export_core(
     close_session_overlays(app, state);
     log::info!("export_result done op={} id={}", req.op, result["id"]);
     Ok(result)
+}
+
+/// 本次保存的目标路径。
+///
+/// - 设置里配了「截图保存位置」→ 直接落到那个目录（重名自动加序号），不弹对话框；
+///   目录被删/盘没挂载时退回对话框，别让保存整条失败。
+/// - 没配 → 弹「另存为」，返回 None 表示用户取消。
+fn resolve_save_path(
+    app: &AppHandle,
+    parent: &tauri::WebviewWindow,
+    state: &AppState,
+) -> Option<std::path::PathBuf> {
+    let dir = state.settings.lock().unwrap().save_dir.trim().to_string();
+    if dir.is_empty() {
+        return pick_save_path(app, parent);
+    }
+    let dir = std::path::PathBuf::from(dir);
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        log::warn!("save_dir {} 不可用（{e}），回退到另存为对话框", dir.display());
+        return pick_save_path(app, parent);
+    }
+    let target = history::unique_sibling(dir.join(history::default_save_name()));
+    log::info!("export_result save to configured dir: {}", target.display());
+    Some(target)
 }
 
 /// 「另存为」原生对话框：默认名走历史同一时间戳模板，PNG 过滤器。
@@ -556,9 +575,11 @@ pub fn history_png(id: i64, state: State<'_, AppState>) -> Result<tauri::ipc::Re
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+/// 批量删除（单条删除也走这条，`ids` 只放一个 id）。
+/// 返回真正删掉的条数：多选里可能有已被别的入口删掉的条目，前端不该报"全删了"。
 #[tauri::command]
-pub fn history_delete(id: i64, state: State<'_, AppState>) {
-    state.history.lock().unwrap().delete(id);
+pub fn history_delete(ids: Vec<i64>, state: State<'_, AppState>) -> usize {
+    state.history.lock().unwrap().delete_many(&ids)
 }
 
 #[tauri::command]
@@ -616,6 +637,8 @@ pub struct SettingsPatch {
     pub flash_ms: Option<u64>,
     pub autostart: Option<bool>,
     pub save_on_copy: Option<bool>,
+    /// 空串 = 每次保存都弹「另存为」（默认）
+    pub save_dir: Option<String>,
 }
 
 #[tauri::command]
@@ -631,6 +654,17 @@ pub fn set_settings(app: AppHandle, patch: SettingsPatch, state: State<'_, AppSt
         }
         if let Some(v) = patch.save_on_copy {
             s.save_on_copy = v;
+        }
+        if let Some(v) = &patch.save_dir {
+            // 空串 = 恢复「每次询问」。非空则顺手建目录：选中的盘符临时不可用时
+            // 建不出来也不算错，保存时 resolve_save_path 会退回对话框。
+            let v = v.trim();
+            if !v.is_empty() {
+                if let Err(e) = std::fs::create_dir_all(v) {
+                    log::warn!("save_dir {v} 创建失败：{e}");
+                }
+            }
+            s.save_dir = v.to_string();
         }
     }
     // 快捷键：先落到 settings，再逐槽重注册。有任何一槽失败就把 settings 整体回滚、
@@ -673,6 +707,51 @@ pub fn set_settings(app: AppHandle, patch: SettingsPatch, state: State<'_, AppSt
     }
     out["settings"] = serde_json::to_value(state.settings.lock().unwrap().clone()).unwrap_or_default();
     Ok(out)
+}
+
+/// 设置页「选择保存位置」：原生目录选择框。返回 None = 用户取消（前端忽略即可）。
+///
+/// 声明为 async：blocking_* 的对话框**不能在主线程调用**（会死锁），
+/// async 命令跑在 tokio 工作线程上，和 export_result 里那次「另存为」同一套路。
+#[tauri::command]
+pub async fn pick_save_dir(webview_window: tauri::WebviewWindow) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    let app = webview_window.app_handle().clone();
+    app.dialog()
+        .file()
+        // 设置窗不是置顶窗，但挂上属主仍然更稳（macOS 上对话框会跟着窗口走）
+        .set_parent(&webview_window)
+        .set_title("选择截图保存位置")
+        .blocking_pick_folder()
+        .and_then(|fp| fp.into_path().ok())
+        .map(|p| p.display().to_string())
+}
+
+/// 在文件管理器里打开目录（Windows 走 explorer，macOS 走 open）
+fn open_dir_in_file_manager(path: &std::path::Path) {
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open").arg(path).spawn();
+    #[cfg(windows)]
+    let _ = std::process::Command::new("explorer").arg(path).spawn();
+}
+
+/// 「打开」当前设置里的截图保存位置。未设置时明确报错，别静默无反应。
+#[tauri::command]
+pub fn open_save_dir(state: State<'_, AppState>) -> Result<(), ApiError> {
+    let dir = state.settings.lock().unwrap().save_dir.trim().to_string();
+    if dir.is_empty() {
+        return Err(ApiError { code: "not_configured", message: "尚未设置截图保存位置".into() });
+    }
+    open_dir_in_file_manager(std::path::Path::new(&dir));
+    Ok(())
+}
+
+/// 打开历史原图目录（内部留档，截图原图始终落这里）
+#[tauri::command]
+pub fn open_history_dir(state: State<'_, AppState>) -> Result<(), ApiError> {
+    let root = state.history.lock().unwrap().root().to_path_buf();
+    open_dir_in_file_manager(&root);
+    Ok(())
 }
 
 /// 关于窗口：定尺寸信息卡，展示软件名 / 版本 / 快捷键。
@@ -742,6 +821,46 @@ pub async fn history_pin(app: AppHandle, id: i64, state: State<'_, AppState>) ->
         }
     }
     Ok(())
+}
+
+// ---------- 系统通知 ----------
+
+/// 系统通知的唯一出口。托盘常驻应用没有主窗口，通知是它唯一能主动「说话」的通道，
+/// 所以这里失败只记日志 —— 通知发不出去（如 Windows 免安装跑、macOS 未授权）不能连累主流程。
+pub fn notify(app: &AppHandle, title: &str, body: &str) {
+    use tauri_plugin_notification::NotificationExt;
+    if let Err(e) = app
+        .notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .show()
+    {
+        log::warn!("notification failed ({title}): {e}");
+    }
+}
+
+/// 启动时把「哪几把键没绑上、为什么」用系统通知说出来。
+///
+/// 只在 hotkey_errors 非空时发；错误条目本身就是给用户看的写法，
+/// 但**逐条全列**会让 toast 被截断（Windows 正文只显示两行），超过三条折叠成计数。
+/// 解析失败（用户手填了非法键名）也走这条通知 —— 标题用「未生效」而不是「被占用」，
+/// 免得把两种原因混成一句误导用户。
+pub fn notify_hotkey_failed(app: &AppHandle) {
+    let failed = app.state::<AppState>().hotkey_errors.lock().unwrap().clone();
+    if failed.is_empty() {
+        return;
+    }
+    let shown = if failed.len() <= 3 {
+        failed.join("；")
+    } else {
+        format!("{}；等 {} 项", failed[..3].join("；"), failed.len())
+    };
+    notify(
+        app,
+        "CapsShot 快捷键未生效",
+        &format!("{shown}。可能被其他程序占用，请在设置里换键或先关掉占用它的程序。"),
+    );
 }
 
 // ---------- 全局快捷键（四槽） ----------
@@ -1072,7 +1191,7 @@ pub fn note_pin_closed(app: &AppHandle, sel: u64) {
 
 #[tauri::command]
 pub fn open_settings_window(app: AppHandle) -> Result<(), ApiError> {
-    windows::open_simple(&app, "settings", "settings.html", 520.0, 560.0)
+    windows::open_simple(&app, "settings", "settings.html", 520.0, 660.0)
         .map_err(|e| ApiError { code: "platform_error", message: e.to_string() })
 }
 
@@ -1094,15 +1213,23 @@ pub fn open_editor_window(app: AppHandle, sel: u64) -> Result<(), ApiError> {
     open_editor(&app, sel)
 }
 
-/// 历史条目 → 重编辑：读 PNG + 已存的 annotationJson，物化成一个新的 Sel 再开编辑窗。
+/// 历史条目 → 重编辑：读**未烘标注的底图** + 已存的 annotationJson，物化成一个新的 Sel 再开编辑窗。
 /// 导出仍走 export_result（每次插新条目），所以是**另存为新条目**，原条目不动。
+///
+/// 底图为什么不能直接用成品图：成品图上的标注已经烘进像素，再叠一遍还原出来的图形 =
+/// 标注画两遍（半透明的记号笔/马赛克尤其明显）。老条目没有独立底图，只能按平面图编辑 ——
+/// 此时**必须丢掉 annotation**，否则同样是重影。
 #[tauri::command]
 pub fn history_edit(id: i64, app: AppHandle, state: State<'_, AppState>) -> Result<serde_json::Value, ApiError> {
     let (png, annotation) = {
         let h = state.history.lock().unwrap();
-        let path = h.png_path(id).ok_or(ApiError { code: "target_not_found", message: "missing".into() })?;
-        (std::fs::read(path).map_err(|e| ApiError { code: "save_failed", message: e.to_string() })?, h.annotation_of(id))
+        let baked = h.png_path(id).ok_or(ApiError { code: "target_not_found", message: "missing".into() })?;
+        match h.src_path(id) {
+            Some(src) => (std::fs::read(src), h.annotation_of(id)),
+            None => (std::fs::read(baked), None),
+        }
     };
+    let png = png.map_err(|e| ApiError { code: "save_failed", message: e.to_string() })?;
     let frame = history::png_to_frame(&png).ok_or(ApiError { code: "degenerate_geometry", message: "png decode".into() })?;
     let rect = {
         let h = state.history.lock().unwrap();

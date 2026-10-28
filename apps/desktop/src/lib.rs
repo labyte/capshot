@@ -64,10 +64,12 @@ pub fn run() {
             );
 
             app.manage(AppState::new(backend, settings, settings_path, store));
-            // 四槽快捷键一次注册；失败不致命，设置页会显式报错
+            // 四槽快捷键一次注册；失败不致命，设置页会显式报错 ——
+            // 但托盘常驻没有主窗口，用户不会主动去翻设置，所以启动即用系统通知点名是哪把键。
             if let Err(e) = commands::rebind_all(app.handle()) {
                 log::error!("hotkey register failed (will surface in settings): {e}");
             }
+            commands::notify_hotkey_failed(app.handle());
             setup_tray(app.handle())?;
             Ok(())
         })
@@ -102,6 +104,9 @@ pub fn run() {
             commands::permission_open_settings,
             commands::get_settings,
             commands::set_settings,
+            commands::pick_save_dir,
+            commands::open_save_dir,
+            commands::open_history_dir,
             commands::hotkey_status,
             commands::open_settings_window,
             commands::open_history_window,

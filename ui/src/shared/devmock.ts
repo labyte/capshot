@@ -68,7 +68,7 @@ export function installMock() {
       windows: fakeWindows(),
       settings: {
         hotkey: "F1", hotkeyPin: "F3", hotkeyHidePins: "Shift+F3", hotkeyThrough: "",
-        quality: 0.86, flashMs: 0, autostart: false, saveOnCopy: false,
+        quality: 0.86, flashMs: 0, autostart: false, saveOnCopy: false, saveDir: "",
       },
       lastRect: null,
     };

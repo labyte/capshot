@@ -31,16 +31,23 @@ impl HistoryStore {
              CREATE TABLE IF NOT EXISTS captures(
                id INTEGER PRIMARY KEY, created_at INTEGER NOT NULL,
                x INTEGER, y INTEGER, width INTEGER, height INTEGER,
-               png_rel TEXT NOT NULL, thumb_rel TEXT,
+               png_rel TEXT NOT NULL, thumb_rel TEXT, src_rel TEXT,
                source TEXT NOT NULL, app_hint TEXT, annotation_json TEXT);
              CREATE INDEX IF NOT EXISTS idx_created ON captures(created_at DESC);",
         )?;
+        // 老库补列：src_rel 存「未烘标注的原始底图」，重编辑要靠它才不会把标注画两遍。
+        // 重复执行必然报 duplicate column，忽略即可（SQLite 没有 ADD COLUMN IF NOT EXISTS）。
+        let _ = conn.execute("ALTER TABLE captures ADD COLUMN src_rel TEXT", []);
         Ok(Self { conn, root })
     }
 
+    /// `png` = 烘好标注的成品图（缩略图/复制/贴图都读它）；
+    /// `base_png` = 同一张截图的**未标注底图**，只在有标注时另存一份 `.src.png`。
+    /// 重编辑必须从底图 + annotation_json 重新叠图形，否则标注会被画第二遍。
     pub fn insert(
         &self,
         png: &[u8],
+        base_png: &[u8],
         thumb: &[u8],
         rect: &PhysicalRect,
         source: &str,
@@ -81,14 +88,29 @@ impl HistoryStore {
         std::fs::create_dir_all(png_path.parent().unwrap()).map_err(|e| e.to_string())?;
         std::fs::create_dir_all(thumb_path.parent().unwrap()).map_err(|e| e.to_string())?;
         std::fs::write(&png_path, png).map_err(|e| e.to_string())?;
+        // 底图与成品图字节相同 = 这张没有标注，不必多存一份。
+        // 写失败也不能连累入库：降级成「没有独立底图」，重编辑按平面图处理（见 src_path）。
+        let src_rel = if base_png.is_empty() || base_png == png {
+            None
+        } else {
+            let rel = format!("history/{y}/{d}/{name}.src.png");
+            let path = self.root.join(&rel);
+            match std::fs::write(&path, base_png) {
+                Ok(()) => Some(rel),
+                Err(e) => {
+                    log::warn!("history base png write failed: {e}");
+                    None
+                }
+            }
+        };
         // 缩略图失败不致命：主图与 DB 行才是历史的本体
         if let Err(e) = std::fs::write(&thumb_path, thumb) {
             log::warn!("thumbnail write failed: {e}");
         }
         self.conn.execute(
-            "INSERT INTO captures(created_at,x,y,width,height,png_rel,thumb_rel,source,app_hint,annotation_json)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
-            params![now, rect.x, rect.y, rect.width, rect.height, png_rel, thumb_rel, source, app_hint, annotation],
+            "INSERT INTO captures(created_at,x,y,width,height,png_rel,thumb_rel,src_rel,source,app_hint,annotation_json)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+            params![now, rect.x, rect.y, rect.width, rect.height, png_rel, thumb_rel, src_rel, source, app_hint, annotation],
         ).map_err(|e| e.to_string())?;
         Ok(self.conn.last_insert_rowid())
     }
@@ -138,12 +160,29 @@ impl HistoryStore {
         rows
     }
 
+    /// 历史根目录（设置页「打开历史目录」用；库与 PNG 都在这下面）
+    pub fn root(&self) -> &std::path::Path {
+        &self.root
+    }
+
     pub fn png_path(&self, id: i64) -> Option<std::path::PathBuf> {
         let rel: String = self
             .conn
             .query_row("SELECT png_rel FROM captures WHERE id=?1", params![id], |r| r.get(0))
             .ok()?;
         Some(self.root.join(rel))
+    }
+
+    /// 重编辑用的**未烘标注底图**。老条目没有这一列（或底图文件已丢）就返回 None，
+    /// 调用方按「成品图即底图」处理 —— 那种图上标注已经烘死在像素里，不能再叠一遍图形。
+    pub fn src_path(&self, id: i64) -> Option<std::path::PathBuf> {
+        let rel: Option<String> = self
+            .conn
+            .query_row("SELECT src_rel FROM captures WHERE id=?1", params![id], |r| r.get(0))
+            .ok()
+            .flatten();
+        let path = self.root.join(rel?);
+        path.is_file().then_some(path)
     }
 
     pub fn rect_of(&self, id: i64) -> Option<(i32, i32, u32, u32)> {
@@ -154,8 +193,12 @@ impl HistoryStore {
             .ok()
     }
 
-    pub fn delete(&self, id: i64) {
+    /// 删一条：成品图、底图、缩略图三个文件 + DB 行。返回 DB 行是否真的删掉了。
+    pub fn delete(&self, id: i64) -> bool {
         if let Some(p) = self.png_path(id) {
+            let _ = std::fs::remove_file(p);
+        }
+        if let Some(p) = self.src_path(id) {
             let _ = std::fs::remove_file(p);
         }
         let rel: Option<String> = self
@@ -166,7 +209,16 @@ impl HistoryStore {
         if let Some(t) = rel {
             let _ = std::fs::remove_file(self.root.join(t));
         }
-        let _ = self.conn.execute("DELETE FROM captures WHERE id=?1", params![id]);
+        self.conn
+            .execute("DELETE FROM captures WHERE id=?1", params![id])
+            .map(|n| n > 0)
+            .unwrap_or(false)
+    }
+
+    /// 批量删（历史页多选）。逐条走 delete，文件与行一一对应，不搞半删半留。
+    /// 返回真正删掉的条数，给前端报告「删了 N 条」而不是闷头刷新。
+    pub fn delete_many(&self, ids: &[i64]) -> usize {
+        ids.iter().filter(|id| self.delete(**id)).count()
     }
 
     /// 重编辑器读回标注 JSON。之前只有写入侧（set_annotation）且从未被调用，
@@ -220,8 +272,85 @@ pub fn default_save_name() -> String {
     format!("{name}.png")
 }
 
+/// 把 `dir/name.png` 落成一个**当前空闲**的路径：同秒内多次保存会撞名
+/// （时间戳模板只到秒，seq 恒为 1），撞上就退到 `name-1.png`、`name-2.png`…
+/// 直接覆盖会静默吞掉上一张图，所以宁可多带个序号。
+pub fn unique_sibling(path: std::path::PathBuf) -> std::path::PathBuf {
+    if !path.exists() {
+        return path;
+    }
+    let dir = path.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("capshot")
+        .to_string();
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("png")
+        .to_string();
+    for i in 1..1000u32 {
+        let cand = dir.join(format!("{stem}-{i}.{ext}"));
+        if !cand.exists() {
+            return cand;
+        }
+    }
+    path
+}
+
 fn secs_of_day(ts: i64) -> i64 {
     (ts % 86400 + 86400) % 86400
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 保存位置固定时，同一秒内连按两次保存不能互相覆盖
+    #[test]
+    fn unique_sibling_never_overwrites() {
+        let dir = std::env::temp_dir().join(format!("capshot-unique-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let first = dir.join("shot.png");
+        assert_eq!(unique_sibling(first.clone()), first);
+        std::fs::write(&first, b"a").unwrap();
+        let second = unique_sibling(first.clone());
+        assert_eq!(second, dir.join("shot-1.png"));
+        std::fs::write(&second, b"b").unwrap();
+        assert_eq!(unique_sibling(first), dir.join("shot-2.png"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 有标注的条目要另存一份未烘标注的底图（重编辑从它重画图形）；
+    /// 没标注的条目不能再存第二份；批量删除把成品图/底图/缩略图/DB 行一并清掉。
+    #[test]
+    fn base_png_split_and_batch_delete() {
+        let root = std::env::temp_dir().join(format!("capshot-history-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let store = HistoryStore::open(root.clone()).unwrap();
+        let rect = PhysicalRect::new(0, 0, 10, 10);
+
+        let marked = store
+            .insert(b"baked-1", b"base-1", b"thumb-1", &rect, "capture", None, Some("{\"v\":2,\"shapes\":[]}"), 1, "capshot")
+            .unwrap();
+        let plain = store
+            .insert(b"same-2", b"same-2", b"thumb-2", &rect, "capture", None, None, 2, "capshot")
+            .unwrap();
+
+        // 成品图照旧是烘好的那张，底图单独一份
+        assert_eq!(std::fs::read(store.png_path(marked).unwrap()).unwrap(), b"baked-1");
+        let src = store.src_path(marked).expect("有空注时底图必须落盘");
+        assert_eq!(std::fs::read(&src).unwrap(), b"base-1");
+        // 字节相同 = 没有标注，不该多存一份
+        assert!(store.src_path(plain).is_none());
+
+        // 多选里混进一个已经被删掉的 id：只报真删掉的条数
+        assert_eq!(store.delete_many(&[marked, plain, 999]), 2);
+        assert!(!src.exists(), "批量删除要连底图一起删");
+        assert!(store.list(10, 0).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
 
 /// civil-from-days（Howard Hinnant 算法，无依赖日期换算）

@@ -21,6 +21,8 @@ export interface SettingsDto {
   flashMs: number;
   autostart: boolean;
   saveOnCopy: boolean;
+  /** 截图保存位置（保存时直接落盘）。空串 = 每次保存弹「另存为」 */
+  saveDir: string;
 }
 
 /** 可录制快捷键的槽位 */

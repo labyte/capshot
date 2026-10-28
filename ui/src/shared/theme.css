@@ -104,7 +104,10 @@ body.history { overflow: auto; padding: 0 18px 24px; }
    写在全局会渗进截图浮层的 .snip-btn 等按钮打起来 */
 
 body.settings header,
-body.history header { display: flex; align-items: center; gap: 12px; padding: 12px 0; }
+body.history header { display: flex; align-items: center; gap: 12px; padding: 12px 0; flex-wrap: wrap; }
+
+/* 历史页头部的按钮里带图标（删除选中），不排齐会往上飘 */
+body.history header button { display: inline-flex; align-items: center; gap: 5px; }
 
 body.settings h1,
 body.history h1 { font-size: 16px; font-weight: 600; }
@@ -148,12 +151,30 @@ body.settings code {
   border-radius: 5px;
 }
 
+/* 保存位置这种长路径：允许在任意字符处折行，否则会把 .row 撑出横向滚动 */
+body.settings code.path {
+  max-width: 100%;
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
 .err { color: var(--no); }
+.ok { color: var(--ok); }
 .hint { color: var(--page-muted); margin-top: 14px; }
 .hk-label { min-width: 150px; color: var(--page-muted); }
 .hint-inline { font-size: 11px; color: var(--page-muted); }
 .perm-ok { color: var(--ok); }
 .perm-no { color: var(--no); }
+
+/* 危险操作：批量删除要先上膛再确认，两态靠颜色区分，别让误点直接删库 */
+body.history button.danger {
+  color: #fff;
+  background: #cf3b32;
+  border-color: #b93229;
+}
+body.history button.danger:hover { background: #b93229; }
+body.history button:disabled { opacity: 0.45; cursor: default; }
 
 #grid {
   display: grid;
@@ -173,6 +194,13 @@ body.settings code {
 /* 注意别读 --tb-on-fg：那个 token 现在是"选中格上的图标色"= 白，
    卡片描边要的是蓝色本身 */
 .card:hover { border-color: var(--tb-accent); }
+
+/* 选中态：边框与内描边都用强调蓝，缩略图上不再压遮罩（图本身要看清才选得对） */
+.card.picked {
+  border-color: var(--tb-accent);
+  box-shadow: 0 0 0 1px var(--tb-accent);
+}
+.card.picked .meta { color: var(--tb-accent); }
 
 .card img {
   width: 100%;
@@ -194,6 +222,32 @@ body.settings code {
 
 /* 缩略图为主，动作图标浮层：默认不占视线，悬停才从右下角浮出 */
 .card .thumb { position: relative; }
+
+/* 左上角的多选角标：悬停/选中才出现，平时不挡缩略图。
+   它是纯视觉的（pointer-events:none），点卡片任意处都在切换选中，不会出现"点了没选中"。 */
+.card .pick {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--tb-edge);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  color: #fff;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.card:hover .pick,
+.card:focus-within .pick,
+.card.picked .pick { opacity: 1; }
+.card.picked .pick { background: var(--tb-accent); border-color: var(--tb-accent); }
 
 .card-acts {
   position: absolute;
@@ -217,9 +271,19 @@ body.settings code {
   transform: none;
 }
 
-.card-acts button {
-  width: 24px;
-  height: 22px;
+/* 动作按钮：图标 16px 居中，周围留够可点面积。
+   悬停提示用 CSS 画（data-tip），原生 title 在 WebView2 里要约 1.5s 才出来，
+   用户反馈"按钮没提示"基本就是它。
+
+   **选择器必须带 body.history**：上面 `body.history button` 的权重是 (0,1,2)，
+   裸 `.card-acts button` 是 (0,1,1) —— 会被它按死。踩过的坑：后者给不出
+   padding:0 / background:transparent，按钮回到 5px 12px 内边距 + 实心底，
+   26px 宽扣掉左右 padding 后内容区 = 0，SVG 被压成零宽，
+   表现就是"悬停浮出的操作按钮是一排空白方块、没有图标"。 */
+body.history .card-acts button {
+  position: relative;
+  width: 26px;
+  height: 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -230,7 +294,38 @@ body.settings code {
   color: var(--tb-fg);
 }
 
-.card-acts button:hover { background: var(--tb-hover); color: var(--tb-fg-strong); }
+body.history .card-acts button svg { display: block; }
+
+body.history .card-acts button:hover { background: var(--tb-hover); color: var(--tb-fg-strong); }
+body.history .card-acts button.act-danger:hover { background: #f7d6d3; color: #cf3b32; }
+
+body.history .card-acts button::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  /* 靠右对齐而不是居中：最右那几颗的长提示（「在文件管理器中显示」）
+     居中会顶出卡片右缘，被 .card 的 overflow:hidden 裁掉半截 */
+  right: -5px;
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: rgba(28, 30, 34, 0.94);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 90ms ease, transform 90ms ease;
+  transform: translateY(2px);
+  z-index: 3;
+}
+
+body.history .card-acts button:hover::after,
+body.history .card-acts button:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .card .meta .acts { display: flex; gap: 4px; }
 
 .card .meta button {
