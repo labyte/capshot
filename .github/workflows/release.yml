@@ -64,7 +64,7 @@ jobs:
         run: |
           npm ci
           npm run build
-          for p in index overlay pin settings history editor; do
+          for p in index overlay pin settings history about; do
             [ -f "dist/$p.html" ] || { echo "::error::dist/$p.html 未产出（vite.config.js 的 rollupOptions.input 漏页）"; exit 1; }
           done
       # 根目录 CLI（tauri 只装在根 package.json）；tauri build 同时产出
@@ -114,7 +114,7 @@ jobs:
         run: |
           npm ci
           npm run build
-          for p in index overlay pin settings history editor; do
+          for p in index overlay pin settings history about; do
             [ -f "dist/$p.html" ] || { echo "::error::dist/$p.html 未产出（vite.config.js 的 rollupOptions.input 漏页）"; exit 1; }
           done
       # 根目录 CLI；tauri build 产出 target/release/capshot（custom-protocol 默认开）

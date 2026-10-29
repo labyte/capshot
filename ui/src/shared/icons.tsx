@@ -284,13 +284,6 @@ export const IconTrash = (p: P) => (
   </Svg>
 );
 
-export const IconEdit = (p: P) => (
-  <Svg {...p}>
-    <path d="M2.6 13.4l.8-3 7.1-7.1 2.2 2.2-7.1 7.1z" />
-    <path d="M11.4 2.4l2.2 2.2" />
-  </Svg>
-);
-
 /** 多选勾：只给历史卡片的选中角标用，1.9 线宽比工具图标更实，18px 下才看得清 */
 export const IconCheck = (p: P) => (
   <Svg {...p} strokeWidth={1.9}>
@@ -303,5 +296,14 @@ export const IconMore = (p: P) => (
     <circle cx="3.5" cy="8" r="1" fill="currentColor" stroke="none" />
     <circle cx="8" cy="8" r="1" fill="currentColor" stroke="none" />
     <circle cx="12.5" cy="8" r="1" fill="currentColor" stroke="none" />
+  </Svg>
+);
+
+/** 信息提示 ⓘ：设置页标签后用（参照 Snipaste 的「开/关贴图穿透 ⓘ」），hover 文案在 title 里 */
+export const IconInfo = (p: P) => (
+  <Svg {...p} strokeWidth={1.1}>
+    <circle cx="8" cy="8" r="5.6" />
+    <path d="M8 7.3v3.4" strokeWidth={1.5} />
+    <circle cx="8" cy="5.1" r="0.85" fill="currentColor" stroke="none" />
   </Svg>
 );

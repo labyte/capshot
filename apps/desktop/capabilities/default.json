@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "capshot 窗口分权：overlay/pin 最小权限，settings/history 可配置",
-  "windows": ["overlay-*", "pin-*", "editor-*", "history", "settings", "about"],
+  "windows": ["overlay-*", "pin-*", "history", "settings", "about"],
   "permissions": [
     "core:default",
     "core:window:allow-close",

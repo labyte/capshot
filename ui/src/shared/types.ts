@@ -28,6 +28,25 @@ export interface SettingsDto {
 /** 可录制快捷键的槽位 */
 export type HotkeySlot = "hotkey" | "hotkeyPin" | "hotkeyHidePins" | "hotkeyThrough";
 
+/**
+ * hotkey_status 返回的一槽状态（对应 apps/desktop/src/commands.rs::hotkey_status）。
+ * 只有**已绑定**的槽才会出现在这里，所以前端不用为「未绑定」画图标。
+ *
+ * - `ok`：这把键真的注册上了（行末绿勾）；false = 没生效（红叉）。
+ * - `label`：短原因，措辞只在 Rust 侧 `HotkeyFailureKind::label()` 有一份，前端别再造句子。
+ * - `failedKey`：出问题的键名。与 `key` 不同 = 刚改的那把新键被拒（当前值仍是能用的旧键），
+ *   这时才需要在行末补一句文字说明是哪把键，否则图标 + hover 就够。
+ * - `detail`：系统给的原始错误串（如 `注册失败：HotKey already registered`），只进 hover。
+ */
+export interface HotkeySlotStatusDto {
+  slot: HotkeySlot;
+  key: string;
+  ok: boolean;
+  failedKey: string | null;
+  label: string | null;
+  detail: string | null;
+}
+
 /** bootstrap 在 overlay 窗返回的形态 */
 export interface BootOverlay {
   kind: "overlay";
@@ -49,20 +68,6 @@ export interface BootPin {
   height: number;
   pad?: number;
 }
-
-/** bootstrap 在 editor 窗返回的形态（重编辑：底图就是这条 sel 的 PNG，无吸附、无二级抓取） */
-export interface BootEditor {
-  kind: "editor";
-  sel: number;
-  width: number;
-  height: number;
-  bounds: PhysicalRect;
-  scale: number;
-  annotation?: string | null;
-  settings: SettingsDto;
-}
-
-export type BootCtx = BootOverlay | BootEditor;
 
 export interface BootPlain {
   kind: "plain";
@@ -94,7 +99,12 @@ export interface HistoryRow {
   thumb_base64: string;
 }
 
+/**
+ * 权限状态（对应 capture-core::PermissionStatus，serde camelCase）。
+ * `null` = 本平台没有这项权限概念（Windows 无 TCC），**不是「未授权」**：
+ * 设置页见到 `screenRecording === null` 时整块「权限」都不渲染。
+ */
 export interface PermissionStatusDto {
-  screenRecording: boolean;
-  accessibility: boolean;
+  screenRecording: boolean | null;
+  accessibility: boolean | null;
 }

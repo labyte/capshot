@@ -3,8 +3,7 @@
 //! 为什么单独成模块而不是留在 render.ts：render.ts 运行时 import 了 model.ts 的 shapeBounds，
 //! 而 model/controller 反过来要用量宽来算文字的 bounds 与命中框 —— 放 render.ts 就是循环依赖。
 //!
-//! 三处必须共用这一份：绘制（render.ts 的 text 分支）、输入框宽度（overlay/editor 共用的
-//! TextInput）、命中框（shapeBounds / hitShape）。任何一方自己拼字体串，就会冒出
+//! 三处必须共用这一份：绘制（render.ts 的 text 分支）、输入框宽度（TextInput）、命中框（shapeBounds / hitShape）。任何一方自己拼字体串，就会冒出
 //! 「打字看得见、提交后点不中」「框宽比实际排版窄一截」这类对不上号的毛病。
 
 const FONT_STACK = '-apple-system, "Segoe UI", "Microsoft YaHei", sans-serif';

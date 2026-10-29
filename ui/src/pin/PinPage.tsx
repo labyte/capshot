@@ -398,8 +398,8 @@ export default function PinPage() {
   // popup 的 at 是**窗口客户区**相对坐标（tauri/src/menu/mod.rs:728 → muda 内部 ClientToScreen），
   // 所以直接喂 e.clientX/clientY 的逻辑像素就对。
   //
-  // ⚠ 有三项功能被暂时摘掉（复制 / 保存 / 重新编辑），成因与恢复条件
-  //   写在下面的「待办」注释块里，另见 docs/testing-windows.md「贴图右键菜单：待办」一节。
+  // ⚠ 有两项功能被暂时摘掉（复制 / 保存），成因与恢复条件写在下面的「待办」注释块里，
+  //   另见 docs/testing-windows.md「贴图右键菜单：待办」一节。第三项「重新编辑」已整条移除。
   const openMenu = useCallback(
     async (e: ReactMouseEvent) => {
       e.preventDefault();
@@ -418,7 +418,7 @@ export default function PinPage() {
       });
       const menu = await Menu.new({
         items: [
-          // ───────────────── 待办：以下三项暂时隐藏 ─────────────────
+          // ───────────────── 待办：以下两项暂时隐藏 ─────────────────
           //
           // P1 「复制到剪贴板」/「保存」—— 两者都调 export_result，而 export_core
           //    （commands.rs）是为**截图层**写的一条龙：无条件 `history.insert()` +
@@ -433,18 +433,16 @@ export default function PinPage() {
           //    恢复条件：ExportReq 加 `from_pin`（或 `skip_history`）标记，export_core
           //    据此跳过入库/关会话/写 last_rect；并决定要不要把当前变换烘进导出图。
           //
-          // P1 「重新编辑…」—— open_editor_window(sel) 拿到的是**已烘焙**的 sel.png
-          //    当底图，而 bootstrap 同时把 `s.annotation` 交回给编辑器，
-          //    controller.loadFrame() 再 parseAnnotation 还原一遍图形 →
-          //    带标注截出来的贴图，进编辑器后**标注画两遍**。
-          //    另外编辑器是普通窗、贴图是 always-on-top，两者重叠时编辑器被压在下面；
-          //    且编辑导出后贴图不会刷新（img src 是启动时取的 blob URL）。
-          //    恢复条件：底图与 annotation 二选一（存原图 + 图形，或存烘焙图 + 不还原），
-          //    并在导出后回推贴图重载。
+          // 「重新编辑…」已**整条移除**（不再是隐藏待办）：历史窗那个入口打开就是空白窗，
+          //    且它本来就带着三个问题 —— 已烘焙底图 + 交回 annotation = 标注画两遍；
+          //    编辑器是普通窗、贴图 always-on-top，重叠时被压在下面；导出后贴图不刷新
+          //    （img src 是启动时取的 blob URL）。
+          //    已删掉的：editor 页面与 editor.html、open_editor_window / history_edit 命令、
+          //    windows::open_editor、bootstrap 的 `editor-` 分支、controller 的 isEditor 分支。
+          //    历史侧仍照旧写底图 .src.png + annotation_json，重做时不必回头补数据。
           //
           // await item("复制到剪贴板", () => void exportOp("copy")),
           // await item("保存", () => void exportOp("save")),
-          // await item("重新编辑…", () => void invoke("open_editor_window", { sel: boot.sel })),
           // ─────────────────────────────────────────────────────────
 
           // 缩放组：zoomBy 走 zoomRef，且内部按 thumbRef 决定是否保持缩略图宽度，

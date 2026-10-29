@@ -72,8 +72,6 @@ html, body {
 body.settings,
 body.history { background: var(--page-bg); color: var(--page-fg); }
 
-body.editor { background: #e9ebef; color: var(--page-fg); }
-
 body.about { background: var(--page-bg); color: var(--page-fg); overflow: hidden; }
 
 /* ---------- 关于窗 ---------- */
@@ -166,6 +164,146 @@ body.settings code.path {
 .hint-inline { font-size: 11px; color: var(--page-muted); }
 .perm-ok { color: var(--ok); }
 .perm-no { color: var(--no); }
+/* 本平台没有这项权限概念（Windows 无 TCC）—— 既不是绿也不是红，别让人以为要去授权 */
+.perm-na { color: var(--page-muted); }
+
+/* 快捷键行末的注册状态图标（参照 Snipaste 的快捷键面板）：
+   勾 = 这把键确实注册上了，叉 = 没生效（被别的程序占用 / 键名非法 / 两槽撞键）。
+   inline-flex 是为了让 15px 的 svg 和旁边的文字、按钮在同一条基线上 */
+.hk-ok,
+.hk-no { display: inline-flex; align-items: center; }
+.hk-ok { color: var(--ok); }
+.hk-no { color: var(--no); }
+
+/* ---------- 设置页：页签 + 两列对齐表单（照 Snipaste 偏好面板）----------
+   列宽规则只在 .form 这一处：标签列 max-content 右对齐、控件列吃剩余宽度。
+   快捷键页多一列 18px 给行末的勾/叉图标（.form.hk）。 */
+body.settings .tabs { display: flex; gap: 4px; padding: 10px 0 4px; }
+
+body.settings .tabs button {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 4px 12px;
+  color: var(--page-fg);
+}
+
+body.settings .tabs button:hover { background: var(--btn-hover); border-color: var(--btn-edge); }
+
+body.settings .tabs button[aria-selected="true"] {
+  background: var(--btn-bg);
+  border-color: var(--btn-edge);
+  font-weight: 600;
+}
+
+body.settings .panel { padding: 10px 0 0; }
+
+body.settings .form {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 10px;
+  row-gap: 8px;
+  align-items: center;
+}
+
+/* 快捷键页多一列（18px）给行末的勾/叉图标 */
+body.settings .form.hk { grid-template-columns: max-content minmax(0, 1fr) 18px; }
+
+body.settings .form > .k {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  text-align: right;
+  color: var(--page-muted);
+  white-space: nowrap;
+}
+
+body.settings .form > .c { min-width: 0; }
+body.settings .form > .span2 { grid-column: 2 / -1; }
+body.settings .form > .spanall { grid-column: 1 / -1; }
+/* 跨列项（长说明、按钮行）必须把 width 钉成 0：网格算 max-content 时会把跨列项的
+   固有宽度灌进被跨的每一列 —— 一句 460px 长的提示能把标签列撑到 325px，控件列只剩 100px。
+   min-width:100% 再把它拉回铺满自己的网格区。 */
+body.settings .form > .span2,
+body.settings .form > .spanall { width: 0; min-width: 100%; }
+body.settings .form h2 { margin: 8px 0 0; }
+/* 网格已经管了行距，.row 自带的 margin 会让控件列比标签列高一截 */
+body.settings .form .row { margin: 0; }
+body.settings .form .row.end { justify-content: flex-end; }
+body.settings .info { display: inline-flex; color: var(--page-muted); cursor: help; }
+
+/* 键位框：整块可点（点下去开始录制），右端 ⊗ 解绑 —— Snipaste 的形制。
+   未绑定时灰字提示「按下快捷键」，别留一个空白框让人以为坏了 */
+body.settings .hk-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 300px;
+  height: 26px;
+  padding: 0 4px 0 8px;
+  background: var(--field-bg);
+  color: var(--field-fg);
+  border: 1px solid var(--btn-edge);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+body.settings .hk-field:hover { border-color: var(--page-muted); }
+
+body.settings .hk-field.rec {
+  border-color: var(--snip-accent);
+  box-shadow: 0 0 0 2px var(--snip-accent-soft);
+}
+
+body.settings .hk-field .val {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.settings .hk-field.unset .val { color: var(--page-muted); }
+
+body.settings .hk-clear {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: #b9bec7;
+  color: #fff;
+}
+
+body.settings .hk-clear:hover { background: var(--no); }
+
+body.settings .hk-state {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 保存位置：白底一格，长路径在任意字符处折行，否则会把控件列撑出横向滚动 */
+body.settings .path-field {
+  background: var(--field-bg);
+  border: 1px solid var(--btn-edge);
+  border-radius: 5px;
+  padding: 4px 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+body.settings .path-field.empty { color: var(--page-muted); }
+
+/* 页签底部的本地错（该键需要修饰键 / 保存失败）：贴在表单左边缘，不跟标签列右对齐 */
+body.settings .form-error { margin: 12px 0 0; }
 
 /* 危险操作：批量删除要先上膛再确认，两态靠颜色区分，别让误点直接删库 */
 body.history button.danger {

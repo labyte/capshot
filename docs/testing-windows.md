@@ -78,7 +78,8 @@ cmd / PowerShell 里运行：
   · **Esc / Ctrl+W / 双击** 关闭；**Shift+Esc** 销毁；**Shift+双击** 缩略图模式
   · **右键菜单（当前实际项）**：恢复原始大小 / 放大 / 缩小 / 缩略图模式 / 不透明度(50·75·100%) /
     灰度 / 反色 / 鼠标穿透 / 保持置顶 / 关闭 / 关闭所有贴图
-    —— 复制、保存、重新编辑三项**已暂时隐藏**，成因见下文「贴图右键菜单：待办」
+    —— 复制、保存两项**已暂时隐藏**，成因见下文「贴图右键菜单：待办」；
+    「重新编辑」已**整条移除**（见同节末条）
   · 开启鼠标穿透后该贴图收不到鼠标事件 —— 用托盘「解除所有贴图穿透」恢复
   · 关掉贴图后再按 **F3**（剪贴板无图时）可复活最近关闭的一张
 
@@ -92,11 +93,16 @@ cmd / PowerShell 里运行：
     恢复条件：`ExportReq` 加 `from_pin`（或 `skip_history`），export_core 据此跳过入库/关会话/写
     last_rect；并定下要不要把当前变换烘进导出图。
     ⚠ 同期 **Ctrl+C / Ctrl+S 仍走这条老路**（摘掉等于贴图没有出图口，属功能回退），待上面收口一起改。
-  · **P1 重新编辑…** —— `open_editor_window(sel)` 用**已烘焙**的 `sel.png` 当底图，bootstrap
-    同时把 `s.annotation` 交回编辑器，`controller.loadFrame()` 再 `parseAnnotation` 还原一遍
-    → 带标注截出来的贴图进编辑器后**标注画两遍**。且编辑器是普通窗、贴图 always-on-top，
-    重叠时编辑器被压在下面；编辑导出后贴图也不刷新（img src 是启动时取的 blob URL）。
-    恢复条件：底图与 annotation 二选一（存原图+图形，或存烘焙图+不还原），并在导出后回推贴图重载。
+  · ~~**P1 重新编辑…**~~ —— **已整条移除**（不是隐藏）。历史窗那个入口打开就是**空白窗**；
+    且它本来就带着三个问题：`open_editor_window(sel)` 用**已烘焙**的 `sel.png` 当底图，
+    bootstrap 又把 `s.annotation` 交回编辑器、`controller.loadFrame()` 再还原一遍图形
+    → 标注画两遍；编辑器是普通窗、贴图 always-on-top，重叠时编辑器被压在下面；
+    编辑导出后贴图不刷新（img src 是启动时取的 blob URL）。
+    删掉的东西：`ui/src/editor/` 与 `ui/editor.html`（含 vite input、capabilities 的 `editor-*`）、
+    `open_editor_window` / `history_edit` / `windows::open_editor`、bootstrap 的 `editor-` 分支、
+    controller 的 `isEditor` 分支、`serialize.parse`（annotationJson 读回侧 + v1 迁移）。
+    **数据侧保留**：历史仍写未烘标注底图 `.src.png` 与 `annotation_json` 列，
+    重做重编辑时不必回头补数据。
   · ~~**P2 恢复原始大小**~~ —— **已修，菜单项已放回**。原先实现是 `resizeTo(1, null, false)`，
     thumb 写死 false 却**没清 `thumbRestore`**：缩略图模式下点它，窗口按整图放大、
     图像仍乘 thumbScale（THUMB_W/base.w）→ 大窗口里一张小图 + 一圈空白。
@@ -108,7 +114,23 @@ cmd / PowerShell 里运行：
     资源表挂在 webview 上，贴图关窗即释放，所以是有界泄漏，但一张贴图反复右键会持续涨。
     恢复条件：开新菜单前把上一批 resource（含子项）逐个 `close()`。
 
-  历史窗：双击条目 = 进重编辑器（可再改标注，导出**另存为新条目**，原条目不变）
+  历史窗：单击卡片选中（Shift+单击连选一段）、悬停浮出动作图标（复制 / 贴图 / 打开目录 / 删除），
+  顶部「全选」「删除选中」两步确认后批量删；**双击不再进重编辑器**（该功能已移除，见上文）
+  · **「在文件管理器中显示」的定位坑（已修，本机实测）** —— 老写法
+    `Command::new("explorer").arg(format!("/select,{}", path.display()))` 有两种表现，
+    都长得像「点了没反应」：
+    1. **混合分隔符**：DB 里的 `png_rel` 恒是 `history/2026/20261028/x.png`，`root.join(rel)`
+       拼出 `C:\…\app.capshot.desktop\history/2026/…`。文件 API 认（所以缩略图/复制/删除
+       一直好着），explorer 不认 —— 实测**开桌面**。改由 `HistoryStore::abs` 按 `/` 拆段
+       逐段 push，png/src/thumb/删除四条路都走它。
+    2. **引号包错地方**：路径含空格（用户名带空格就踩）时 `arg()` 把整个
+       `/select,C:\a b\x.png` 一起加引号 → 实测**开「文档」**。要的是引号只包路径
+       `/select,"C:\a b\x.png"`，只有 `raw_arg`（`std::os::windows::process::CommandExt`）
+       拼得出这个形状。
+    图被外部删掉时 `/select` 也会退化成开「文档」，所以退一步只开它所在目录；
+    连目录都不在了就报错（`文件已不在磁盘上：…`），别再静默开一张别的窗口。
+    参数形状与路径换算各有一条单测盯着（`commands::tests::explorer_reveal_arg_…`、
+    `history::tests::rel_keys_become_native_paths`）。
   设置窗：四个快捷键槽可分别改键（F1–F12 / PrintScreen / Pause 可裸键，其余需修饰键）；
   「截图保存位置」选文件夹后 Ctrl+S 直接落盘、同名自动加 `-1`/`-2`，「改为每次询问」恢复弹框，
   「打开文件夹」/「打开历史原图目录」应能调起资源管理器

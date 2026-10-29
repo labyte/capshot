@@ -31,7 +31,6 @@ export default defineConfig({
         pin: resolve(root, "pin.html"),
         settings: resolve(root, "settings.html"),
         history: resolve(root, "history.html"),
-        editor: resolve(root, "editor.html"),
         about: resolve(root, "about.html"),
       },
     },

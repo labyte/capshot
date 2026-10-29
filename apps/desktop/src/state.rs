@@ -17,7 +17,8 @@ pub struct Sel {
     pub png: Vec<u8>,
     pub source: String,
     pub app_hint: Option<String>,
-    /// annotationJson（v2 结构）。历史重编辑据此把图形还原成可编辑状态；
+    /// annotationJson（v2 结构）。导出时随条目落进历史的 annotation_json 列；
+    /// 「重新编辑」已移除，所以当前没有读取方（数据仍写，见 history.rs::insert）。
     /// 截图当场的 sel 没有它，贴图上的标注已经烘进像素。
     pub annotation: Option<String>,
 }
@@ -46,7 +47,65 @@ pub enum ShortcutAction {
     ToggleThrough,
 }
 
+impl ShortcutAction {
+    /// 对应设置里的槽位字段名，**与 `ui/src/shared/types.ts` 的 `HotkeySlot` 逐字对齐**：
+    /// 设置页靠它把一条失败记录钉回正确的那一行，对不上就谁都不亮。
+    pub fn slot(&self) -> &'static str {
+        match self {
+            ShortcutAction::Snip => "hotkey",
+            ShortcutAction::PinClipboard => "hotkeyPin",
+            ShortcutAction::TogglePins => "hotkeyHidePins",
+            ShortcutAction::ToggleThrough => "hotkeyThrough",
+        }
+    }
+}
+
 pub type Shortcut = tauri_plugin_global_shortcut::Shortcut;
+
+/// 快捷键失败的原因类别。分类必须在注册现场就做好：启动通知只说「哪把键」，
+/// 设置页要说「为什么」（但只说短原因 `label`，内部错误串留给日志和 hover 提示）。
+/// 若只存一条拼好的字符串，展示层就得反过来解析「（注册失败：…）」这种内部措辞，
+/// 改一个字文案就散架。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HotkeyFailureKind {
+    /// 系统侧注册不上 —— 绝大多数是被别的程序占用（本机实测：Snipaste 占 F1）
+    Occupied,
+    /// 用户手填的键名解析不了
+    Invalid,
+    /// 同一把物理键被两个动作槽抢
+    Conflict,
+}
+
+impl HotkeyFailureKind {
+    /// 给用户看的短原因。措辞只有这一份，设置页与改键返回都复用它。
+    pub fn label(&self) -> &'static str {
+        match self {
+            HotkeyFailureKind::Occupied => "已被其它程序占用",
+            HotkeyFailureKind::Invalid => "键名无法识别",
+            HotkeyFailureKind::Conflict => "与另一个快捷键冲突",
+        }
+    }
+}
+
+/// 一条快捷键失败记录。
+#[derive(Debug, Clone)]
+pub struct HotkeyFailure {
+    /// 用户配置里的原始写法（`F1`、`Shift+F3`），可直接读给用户听
+    pub key: String,
+    /// 哪个槽位（`ShortcutAction::slot`），设置页据此定位到具体那一行
+    pub slot: &'static str,
+    pub kind: HotkeyFailureKind,
+    /// 内部原因（如 `注册失败：HotKey already registered`）。只进日志与 hover 提示，
+    /// 不出现在通知或正文里 —— 用户读不懂，还会把短行撑爆。
+    pub detail: String,
+}
+
+impl HotkeyFailure {
+    /// 日志用的一行完整说明：`F1（注册失败：…）`
+    pub fn display(&self) -> String {
+        format!("{}（{}）", self.key, self.detail)
+    }
+}
 
 pub struct AppState {
     pub backend: Box<dyn CaptureBackend>,
@@ -71,9 +130,9 @@ pub struct AppState {
     /// 处于鼠标穿透状态的贴图 sel 集合。tauri 只有 set_ignore_cursor_events 的
     /// **setter、没有 getter**，所以穿透态必须由宿主自己记，否则无法切换与兜底恢复。
     pub pin_through: Mutex<std::collections::HashSet<u64>>,
-    /// 最近一次快捷键注册失败的说明（含被别的程序占用的情况，比如 Snipaste 占着 F1）。
+    /// 最近一次快捷键注册失败的记录（含被别的程序占用的情况，比如 Snipaste 占着 F1）。
     /// 只写日志的话，用户只会觉得「按了没反应」，所以要留一个前端可见的出口。
-    pub hotkey_errors: Mutex<Vec<String>>,
+    pub hotkey_errors: Mutex<Vec<HotkeyFailure>>,
 }
 
 impl AppState {
@@ -129,7 +188,7 @@ impl AppState {
         g.push_back(s);
     }
 
-    #[allow(dead_code)] // M8 重编辑预留
+    #[allow(dead_code)] // 预留：当前无调用方（原为 M8 重编辑器留的口子）
     pub fn session_monitors(&self) -> Vec<MonitorInfo> {
         self.sessions
             .lock()

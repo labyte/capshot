@@ -9,3 +9,7 @@ description = "capshot 截图核心：平台无关的类型契约、窗口过滤
 serde.workspace = true
 thiserror.workspace = true
 image.workspace = true
+
+[dev-dependencies]
+# 只为锁 DTO 的线上形状（字段名 / null 语义）—— 见 tests/core.rs
+serde_json.workspace = true

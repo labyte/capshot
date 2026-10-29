@@ -185,19 +185,6 @@ pub fn bootstrap(window: tauri::Window, state: State<'_, AppState>) -> Result<se
             "lastRect": *state.last_rect.lock().unwrap(),
         }));
     }
-    if let Some(rest) = label.strip_prefix("editor-") {
-        let sel: u64 = rest.parse().map_err(|_| ApiError { code: "bad_label", message: label })?;
-        let g = state.selections.lock().unwrap();
-        let s = g.get(&sel).ok_or(ApiError { code: "target_not_found", message: "sel gone".into() })?;
-        return Ok(serde_json::json!({
-            "kind": "editor", "sel": sel,
-            "width": s.frame.width, "height": s.frame.height,
-            "bounds": { "x": 0, "y": 0, "width": s.frame.width, "height": s.frame.height },
-            "scale": window.scale_factor().unwrap_or(1.0),
-            "annotation": s.annotation,
-            "settings": *state.settings.lock().unwrap(),
-        }));
-    }
     if let Some(rest) = label.strip_prefix("pin-") {
         let sel: u64 = rest.parse().map_err(|_| ApiError { code: "bad_label", message: label })?;
         let g = state.selections.lock().unwrap();
@@ -336,15 +323,16 @@ pub fn export_core(
     let (sel, base_png) = {
         let mut g = state.selections.lock().unwrap();
         let s = g.get_mut(&req.sel).ok_or(ApiError { code: "target_not_found", message: "sel gone".into() })?;
-        // 叠标注之前先留一份底图：历史里成品图与底图要分开存，
-        // 重编辑从底图重画图形，成品图只给缩略图/复制/贴图用（见 history_edit）。
+        // 叠标注之前先留一份底图：历史里成品图与底图分开存（底图 + annotation_json 原本是
+        // 「重新编辑」的原料）。重编辑功能已移除，但**写入侧保留**：老条目照样能读，
+        // 将来重做重编辑不必回头补数据。成品图仍只给缩略图/复制/贴图用。
         let base_png = s.png.clone();
         if let Some(b64) = &req.png_base64 {
             let bytes = base64_decode(b64).ok_or(ApiError { code: "degenerate_geometry", message: "bad png b64".into() })?;
             s.png = bytes;
             s.frame = history::png_to_frame(&s.png).ok_or(ApiError { code: "degenerate_geometry", message: "png decode".into() })?;
         }
-        // 把标注一并留在 sel 上，贴图菜单的「重新编辑」才能还原成可编辑图形而不是已烘焙的像素
+        // 标注 JSON 一并留在 sel 上，随 history.insert 落进 annotation_json 列（当前无消费者）
         if req.annotation_json.is_some() {
             s.annotation = req.annotation_json.clone();
         }
@@ -393,7 +381,7 @@ pub fn export_core(
         copy_to_clipboard(state, &sel)?;
     }
     if req.op == "save" || req.op == "copySave" {
-        // 写用户选定的路径；历史目录里那份是内部留档（供历史面板/重编辑），两者并存
+        // 写用户选定的路径；历史目录里那份是内部留档（供历史面板），两者并存
         let target = save_target.unwrap_or_default();
         std::fs::write(&target, &sel.png)
             .map_err(|e| ApiError { code: "save_failed", message: e.to_string() })?;
@@ -588,8 +576,36 @@ pub fn history_open_folder(id: i64, state: State<'_, AppState>) -> Result<(), Ap
     #[cfg(target_os = "macos")]
     let _ = std::process::Command::new("open").arg("-R").arg(&path).spawn();
     #[cfg(windows)]
-    let _ = std::process::Command::new("explorer").arg(format!("/select,{}", path.display())).spawn();
+    {
+        use std::os::windows::process::CommandExt;
+        let arg = explorer_reveal_arg(&path).ok_or(ApiError {
+            code: "target_not_found",
+            message: format!("文件已不在磁盘上：{}", path.display()),
+        })?;
+        let _ = std::process::Command::new("explorer").raw_arg(arg).spawn();
+    }
     Ok(())
+}
+
+/// explorer.exe 的「定位到这张图」参数（含引号，**必须配 `raw_arg` 才能拼对**）。
+///
+/// 两个本机实测过的坑，踩中任一个的表现都是「点了没定位到目录」：
+/// 1. **混合分隔符**（`…\history/2026/x.png`）→ explorer 直接开桌面。相对键到本地路径的
+///    换算已由 `HistoryStore::abs` 负责，这里再兜一次，防日后有人绕过它直接 join。
+/// 2. 路径含空格（用户名带空格就会踩）时 `Command::arg` 会把**整个**
+///    `/select,C:\a b\x.png` 一起加引号 → explorer 解析失败，开「文档」。它要的是
+///    引号只包路径：`/select,"C:\a b\x.png"`，只有 raw_arg 给得出这个形状。
+///
+/// 图被外部删掉时 `/select` 同样退化成开「文档」，所以退一步只开它所在目录；
+/// 连目录都不在了就返回 None，让调用方明确报错——静默开一个别的文件夹最迷惑人。
+#[cfg(windows)]
+fn explorer_reveal_arg(path: &std::path::Path) -> Option<String> {
+    let native = path.to_string_lossy().replace('/', "\\");
+    if std::fs::metadata(&native).is_ok() {
+        return Some(format!("/select,\"{native}\""));
+    }
+    let dir = std::path::Path::new(&native).parent()?;
+    std::fs::metadata(dir).is_ok().then(|| format!("\"{}\"", dir.display()))
 }
 
 // ---------- 权限 / 设置 ----------
@@ -623,6 +639,21 @@ pub fn permission_open_settings() {
 #[tauri::command]
 pub fn get_settings(state: State<'_, AppState>) -> Settings {
     state.settings.lock().unwrap().clone()
+}
+
+/// 设置页「恢复默认」的键位来源。
+///
+/// 只认 `Settings::default()`：默认值在前端再抄一份就是两处真相，
+/// 以后改 Rust 默认键（比如 F1 → Ctrl+Shift+A）时设置页必然对不上。
+#[tauri::command]
+pub fn default_hotkeys() -> serde_json::Value {
+    let d = Settings::default();
+    serde_json::json!({
+        "hotkey": d.hotkey,
+        "hotkeyPin": d.hotkey_pin,
+        "hotkeyHidePins": d.hotkey_hide_pins,
+        "hotkeyThrough": d.hotkey_through,
+    })
 }
 
 #[derive(Deserialize)]
@@ -688,7 +719,9 @@ pub fn set_settings(app: AppHandle, patch: SettingsPatch, state: State<'_, AppSt
             if let Err(e2) = rebind_all_keep_report(&app) {
                 log::error!("shortcut rollback failed: {e2}");
             }
-            out["hotkeyError"] = serde_json::json!(e);
+            // 内部错误串只进日志；前端不再收这串长文案 —— 它按 hotkey_status 的结构化
+            // 记录在对应那一行上只显示「F1 已被其它程序占用」，比多一段红字好读。
+            log::warn!("改键未生效，已回滚原键位: {e}");
         } else {
             out["hotkey"] = serde_json::json!(state.settings.lock().unwrap().hotkey);
             out["hotkeyPin"] = serde_json::json!(state.settings.lock().unwrap().hotkey_pin);
@@ -840,32 +873,36 @@ pub fn notify(app: &AppHandle, title: &str, body: &str) {
     }
 }
 
-/// 启动时把「哪几把键没绑上、为什么」用系统通知说出来。
+/// 启动时只有一条快捷键通知：**点名是哪把键，别的话一律不说。**
 ///
-/// 只在 hotkey_errors 非空时发；错误条目本身就是给用户看的写法，
-/// 但**逐条全列**会让 toast 被截断（Windows 正文只显示两行），超过三条折叠成计数。
-/// 解析失败（用户手填了非法键名）也走这条通知 —— 标题用「未生效」而不是「被占用」，
+/// 正文只有键名（`F1、Shift+F3`），不带内部错误串、不带「请在设置里换键或先关掉
+/// 占用它的程序」这类建议 —— Windows toast 正文只显示两行，长文案会被截断。
+/// 想追原因的人去设置页：那把键会红在它自己那一行上（短原因 + hover 细节）。
+/// 标题按原因分类：全是注册失败才说「被占用」，掺了解析失败等别的成因就说「未生效」，
 /// 免得把两种原因混成一句误导用户。
 pub fn notify_hotkey_failed(app: &AppHandle) {
     let failed = app.state::<AppState>().hotkey_errors.lock().unwrap().clone();
     if failed.is_empty() {
         return;
     }
-    let shown = if failed.len() <= 3 {
-        failed.join("；")
+    // 同一把键可能在多个槽位上各失败一次，通知里只出现一次
+    let mut keys: Vec<&str> = Vec::new();
+    for f in &failed {
+        if !keys.iter().any(|k| *k == f.key.as_str()) {
+            keys.push(&f.key);
+        }
+    }
+    let title = if failed.iter().all(|f| f.kind == HotkeyFailureKind::Occupied) {
+        "CapsShot 快捷键被占用"
     } else {
-        format!("{}；等 {} 项", failed[..3].join("；"), failed.len())
+        "CapsShot 快捷键未生效"
     };
-    notify(
-        app,
-        "CapsShot 快捷键未生效",
-        &format!("{shown}。可能被其他程序占用，请在设置里换键或先关掉占用它的程序。"),
-    );
+    notify(app, title, &keys.join("、"));
 }
 
 // ---------- 全局快捷键（四槽） ----------
 
-use crate::state::{Shortcut, ShortcutAction};
+use crate::state::{HotkeyFailure, HotkeyFailureKind, Shortcut, ShortcutAction};
 
 /// 单一 handler 的落点：按「哪把键触发」分派。存的是解析后的 Shortcut，
 /// 不能用字符串比（Display 是大写规范名）。
@@ -905,13 +942,18 @@ pub fn rebind_all(app: &AppHandle) -> Result<usize, String> {
     let gs = app.global_shortcut();
 
     let mut registered: Vec<(Shortcut, ShortcutAction)> = Vec::new();
-    let mut failed: Vec<String> = Vec::new();
+    let mut failed: Vec<HotkeyFailure> = Vec::new();
 
     for (raw, action) in desired {
         let shortcut = match raw.parse::<Shortcut>() {
             Ok(s) => s,
             Err(e) => {
-                failed.push(format!("{raw}（解析失败：{e}）"));
+                failed.push(HotkeyFailure {
+                    key: raw,
+                    slot: action.slot(),
+                    kind: HotkeyFailureKind::Invalid,
+                    detail: format!("解析失败：{e}"),
+                });
                 continue;
             }
         };
@@ -960,7 +1002,12 @@ pub fn rebind_all(app: &AppHandle) -> Result<usize, String> {
                         registered.push(p);
                     }
                 }
-                failed.push(format!("{raw}（注册失败：{e}）"));
+                failed.push(HotkeyFailure {
+                    key: raw,
+                    slot: action.slot(),
+                    kind: HotkeyFailureKind::Occupied,
+                    detail: format!("注册失败：{e}"),
+                });
             }
         }
     }
@@ -969,9 +1016,32 @@ pub fn rebind_all(app: &AppHandle) -> Result<usize, String> {
     let mut seen: Vec<(Shortcut, ShortcutAction)> = Vec::new();
     for entry in &registered {
         if seen.iter().any(|(s, _)| *s == entry.0) && seen.iter().any(|(s, a)| *s == entry.0 && *a != entry.1) {
-            failed.push(format!("{:?} 被多个动作占用", entry.0));
+            failed.push(HotkeyFailure {
+                // 用 Display 而不是 Debug：这个键名会直接出现在启动通知里
+                key: entry.0.to_string(),
+                slot: entry.1.slot(),
+                kind: HotkeyFailureKind::Conflict,
+                detail: "被多个动作占用".into(),
+            });
         }
         seen.push(*entry);
+    }
+
+    // 解绑清理：上一轮注册着、这一轮不再期望的键要真的注销。
+    // 不补这一步的话，从设置页点 ⊗ 解绑只是把它从 `bindings` 表里剔掉 ——
+    // 系统侧那把键仍被我们占着：按下去没人分派（哑键），别的程序也注册不上。
+    let stale_os: Vec<Shortcut> = state
+        .bindings
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(s, _)| *s)
+        .filter(|s| !registered.iter().any(|(r, _)| r == s))
+        .collect();
+    for s in stale_os {
+        if let Err(e) = gs.unregister(s) {
+            log::warn!("解绑的快捷键注销失败 {s:?}: {e}");
+        }
     }
 
     *state.bindings.lock().unwrap() = registered.clone();
@@ -980,7 +1050,7 @@ pub fn rebind_all(app: &AppHandle) -> Result<usize, String> {
         Ok(registered.len())
     } else {
         // 部分成功：已经注册上的槽位保持可用，调用方按 failed 提示用户
-        Err(failed.join(" | "))
+        Err(failed.iter().map(HotkeyFailure::display).collect::<Vec<_>>().join(" | "))
     }
 }
 
@@ -995,13 +1065,42 @@ fn rebind_all_keep_report(app: &AppHandle) -> Result<usize, String> {
     r
 }
 
-/// 前端可见的快捷键状态：注册失败必须说得出是哪一槽、为什么
+/// 设置页每槽的注册结论（行末那个勾/叉图标就是它）。
+///
+/// 结论必须在宿主侧算：前端只拿得到「配置里写的键名」，不知道系统里到底注册上没有 ——
+/// 而 `state.bindings` 是唯一记录实际注册结果的表（`rebind_all` 只把注册成功的塞进去，
+/// 改键被拒时留在表里的仍是那把能用的旧键）。
+///
+/// 一次返回**全部四个槽**（未绑定的槽不在 `bindings()` 里，前端就不给图标），
+/// 所以勾和叉是同一份数据算出来的，不会出现「有叉没勾」的偏向。
 /// （本机实测：Snipaste 在跑时 F1/F3/Shift+F3 全部撞键）
 #[tauri::command]
 pub fn hotkey_status(state: State<'_, AppState>) -> serde_json::Value {
+    let desired = state.settings.lock().unwrap().bindings();
+    let registered = state.bindings.lock().unwrap().clone();
     let errors = state.hotkey_errors.lock().unwrap().clone();
-    let registered = state.bindings.lock().unwrap().len();
-    serde_json::json!({ "errors": errors, "registered": registered })
+    let slots: Vec<serde_json::Value> = desired
+        .iter()
+        .map(|(raw, action)| {
+            let live = raw
+                .parse::<Shortcut>()
+                .ok()
+                .map(|p| registered.iter().any(|(s, a)| *a == *action && *s == p))
+                .unwrap_or(false);
+            let err = errors.iter().find(|e| e.slot == action.slot());
+            serde_json::json!({
+                "slot": action.slot(),
+                "key": raw,
+                // 勾 = 这把键确实注册上了；叉 = 没生效（被占用 / 键名非法 / 槽位撞键）
+                "ok": live && err.is_none(),
+                // failedKey ≠ key 说明是「刚改的那把新键被拒」，当前值还是能用的旧键
+                "failedKey": err.map(|e| e.key.clone()),
+                "label": err.map(|e| e.kind.label()),
+                "detail": err.map(|e| e.detail.clone()),
+            })
+        })
+        .collect();
+    serde_json::json!({ "slots": slots })
 }
 
 // ---------- 贴图：剪贴板 / 可见性 / 穿透 / 菜单 ----------
@@ -1191,60 +1290,9 @@ pub fn note_pin_closed(app: &AppHandle, sel: u64) {
 
 #[tauri::command]
 pub fn open_settings_window(app: AppHandle) -> Result<(), ApiError> {
-    windows::open_simple(&app, "settings", "settings.html", 520.0, 660.0)
+    // 分页之后每页只有几行，660 高的话底部一片空白；宽度要够放「标签列 + 300px 键位框 + 状态列」
+    windows::open_simple(&app, "settings", "settings.html", 520.0, 400.0)
         .map_err(|e| ApiError { code: "platform_error", message: e.to_string() })
-}
-
-/// 重新编辑器。贴图菜单与历史窗共用：入参恒为 sel id（历史条目先物化成 sel）。
-pub fn open_editor(app: &AppHandle, sel: u64) -> Result<(), ApiError> {
-    let state = app.state::<AppState>();
-    let dims = {
-        let g = state.selections.lock().unwrap();
-        let s = g.get(&sel).ok_or(ApiError { code: "target_not_found", message: "sel gone".into() })?;
-        (s.frame.width, s.frame.height)
-    };
-    windows::open_editor(app, sel, dims.0, dims.1)
-        .map_err(|e| ApiError { code: "platform_error", message: e.to_string() })?;
-    Ok(())
-}
-
-#[tauri::command]
-pub fn open_editor_window(app: AppHandle, sel: u64) -> Result<(), ApiError> {
-    open_editor(&app, sel)
-}
-
-/// 历史条目 → 重编辑：读**未烘标注的底图** + 已存的 annotationJson，物化成一个新的 Sel 再开编辑窗。
-/// 导出仍走 export_result（每次插新条目），所以是**另存为新条目**，原条目不动。
-///
-/// 底图为什么不能直接用成品图：成品图上的标注已经烘进像素，再叠一遍还原出来的图形 =
-/// 标注画两遍（半透明的记号笔/马赛克尤其明显）。老条目没有独立底图，只能按平面图编辑 ——
-/// 此时**必须丢掉 annotation**，否则同样是重影。
-#[tauri::command]
-pub fn history_edit(id: i64, app: AppHandle, state: State<'_, AppState>) -> Result<serde_json::Value, ApiError> {
-    let (png, annotation) = {
-        let h = state.history.lock().unwrap();
-        let baked = h.png_path(id).ok_or(ApiError { code: "target_not_found", message: "missing".into() })?;
-        match h.src_path(id) {
-            Some(src) => (std::fs::read(src), h.annotation_of(id)),
-            None => (std::fs::read(baked), None),
-        }
-    };
-    let png = png.map_err(|e| ApiError { code: "save_failed", message: e.to_string() })?;
-    let frame = history::png_to_frame(&png).ok_or(ApiError { code: "degenerate_geometry", message: "png decode".into() })?;
-    let rect = {
-        let h = state.history.lock().unwrap();
-        match h.rect_of(id) {
-            Some((x, y, w, hh)) => PhysicalRect::new(x, y, w, hh),
-            None => PhysicalRect::ZERO,
-        }
-    };
-    let sel = state.next_id();
-    state.selections.lock().unwrap().insert(
-        sel,
-        Sel { frame, rect, png, source: "history".into(), app_hint: Some(format!("history:{id}")), annotation },
-    );
-    open_editor(&app, sel)?;
-    Ok(serde_json::json!({ "sel": sel }))
 }
 
 #[tauri::command]
@@ -1274,6 +1322,40 @@ impl ApiErr for CaptureError {
     }
     fn into_api(&self) -> ApiError {
         ApiError::from(self.clone_serde())
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::explorer_reveal_arg;
+
+    /// 锁住 explorer 的 /select 参数形状。两种写错的实测表现都是「点了没定位到目录」：
+    /// 混合分隔符 → 开桌面；引号包住整个 `/select,...` 参数 → 开「文档」。
+    #[test]
+    fn explorer_reveal_arg_avoids_both_parsing_traps() {
+        // 目录名带空格 = 用户名带空格的那类机器上 %APPDATA% 的真实形状
+        let dir = std::env::temp_dir()
+            .join(format!("capshot-reveal-{}", std::process::id()))
+            .join("tmp reveal test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("shot.png");
+        std::fs::write(&f, b"x").unwrap();
+
+        let arg = explorer_reveal_arg(&f).unwrap();
+        assert_eq!(arg, format!("/select,\"{}\"", f.display()));
+        assert!(arg.starts_with("/select,\""), "引号只能包路径：{arg}");
+        // 开关本身就叫 /select，只能查它后面那段路径
+        let path_part = arg.trim_start_matches("/select,").trim_matches('"');
+        assert!(!path_part.contains('/'), "explorer 不认正斜杠：{path_part}");
+
+        // 图被外部删了 → 退化成只开目录（不能再带 /select，否则又是一张错的窗口）
+        std::fs::remove_file(&f).unwrap();
+        let arg = explorer_reveal_arg(&f).unwrap();
+        assert!(!arg.contains("/select") && arg.starts_with('"'), "{arg}");
+
+        // 连目录都没了 → None：调用方报错，而不是静默开个别的文件夹
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+        assert_eq!(explorer_reveal_arg(&f), None);
     }
 }
 

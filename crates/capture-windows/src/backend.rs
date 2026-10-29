@@ -64,9 +64,11 @@ impl CaptureBackend for WindowsBackend {
         wgc::capture_window(hwnd, &PHYSICAL_RECT_ZERO).or_else(|_| print_window::capture_window(hwnd))
     }
 
-    /// Windows 无 TCC 概念：屏幕抓取恒允许（UAC 完整性级别边界在文档说明）。
+    /// Windows 无 macOS TCC 那套权限：屏幕抓取不需要授权。
+    /// 报 None（不适用）而不是 true —— 说「已授权」是假称自己查过，而这里确实没得查。
+    /// UAC 完整性级别的边界（抓不到比自身更高权限的窗口）在文档说明。
     fn permission_status(&self) -> PermissionStatus {
-        PermissionStatus { screen_recording: true, accessibility: false }
+        PermissionStatus::NOT_APPLICABLE
     }
 
     fn request_permission(&self) -> PermissionOutcome {

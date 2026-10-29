@@ -22,7 +22,6 @@ import {
   shapeHandles,
   sizeDotPx,
 } from "../../annotate/model";
-import { parse as parseAnnotation } from "../../annotate/serialize";
 import {
   clamp,
   CURSOR_FOR_HANDLE,
@@ -37,7 +36,7 @@ import {
   type Rect,
   type ToolId,
 } from "./types";
-import type { BootCtx, BootOverlay, SnapshotDto } from "../../shared/types";
+import type { BootOverlay, SnapshotDto } from "../../shared/types";
 
 export const ACCENT = "#4c9ff5";
 const MASK_ALPHA = 0.5;
@@ -171,21 +170,17 @@ export class OverlayController {
   private layout = { cssScale: 1, originX: 0, originY: 0, physW: 1, physH: 1 };
 
   constructor(
-    private readonly boot: BootCtx,
+    private readonly boot: BootOverlay,
     canvas: HTMLCanvasElement,
   ) {
     this.canvas = canvas;
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("2d context unavailable");
     this.ctx = ctx;
-    // 重编辑场景：底图即选区，选区不可改，直接进 adjusting，并把已存标注还原成可编辑图形
-    const editor = this.boot.kind === "editor";
     this.store = createStore<OverlayState>({
-      phase: editor ? "adjusting" : "picking",
+      phase: "picking",
       hover: null,
-      sel: editor
-        ? { x: 0, y: 0, w: this.boot.bounds.width, h: this.boot.bounds.height }
-        : null,
+      sel: null,
       tool: null,
       props: { ...DEFAULT_PROPS },
       shapes: [],
@@ -218,15 +213,6 @@ export class OverlayController {
     return this.frame;
   }
 
-  /** 重编辑模式：底图是一张已有的 sel，没有会话、没有吸附候选、选区不可改 */
-  get isEditor(): boolean {
-    return this.boot.kind === "editor";
-  }
-
-  private get overlay(): BootOverlay | null {
-    return this.boot.kind === "overlay" ? this.boot : null;
-  }
-
   /** 高亮框左上角显示的窗口标识（应用名 + 标题截断），对齐 Snipaste 的悬浮提示 */
   windowTitleAt(r: Rect): string | null {
     const w = this.chain.find((c) => {
@@ -243,31 +229,19 @@ export class OverlayController {
 
   // ---------- 装载 ----------
 
-  /** 加载底图。overlay = 会话冻结帧；editor = 既有 sel 的 PNG。失败返回 false */
+  /** 加载底图（会话冻结帧）。失败返回 false */
   async loadFrame(): Promise<boolean> {
     this.canvas.width = this.boot.bounds.width;
     this.canvas.height = this.boot.bounds.height;
     try {
-      const buf = this.isEditor
-        ? await invoke<ArrayBuffer>("get_selection_png", { sel: (this.boot as { sel: number }).sel })
-        : await invoke<ArrayBuffer>("get_monitor_frame", {
-            token: this.overlay!.token,
-            monitor: this.overlay!.monitor,
-          });
+      const buf = await invoke<ArrayBuffer>("get_monitor_frame", {
+        token: this.boot.token,
+        monitor: this.boot.monitor,
+      });
       this.frame = await createImageBitmap(new Blob([buf], { type: "image/png" }));
     } catch (e) {
       console.error("底图加载失败", e);
       return false;
-    }
-    if (this.isEditor) {
-      const ann = (this.boot as { annotation?: string | null }).annotation;
-      const shapes = parseAnnotation(ann);
-      if (shapes.length) {
-        this.store.set({ shapes });
-        this.nextShapeId = Math.max(...shapes.map((s) => s.id), 0) + 1;
-      }
-      // 编辑器没有"未定选区"这一步，直接交还给导出路径
-      this.committedSelId = (this.boot as { sel: number }).sel;
     }
     this.measureLayout();
     this.bind();
@@ -457,9 +431,9 @@ export class OverlayController {
       shapes: s.shapes,
       deps: { source: this.frame, scale: this.scale },
       /* 选区的 8 向手柄**常驻**：切到绘图工具、甚至正在拖一笔，都照样显示照样抓
-         （用户要求：随时可调截图选区）。重编辑里选区就是整幅图，画一圈手柄只是噪声。 */
+         （用户要求：随时可调截图选区）。 */
       showHandles:
-        (s.phase === "adjusting" || s.phase === "tool-drawing") && s.toolbarVisible && !this.isEditor,
+        (s.phase === "adjusting" || s.phase === "tool-drawing") && s.toolbarVisible,
       selectedId: s.selectedId,
       hoverId: this.hoverShapeId,
       hotHandle: this.hotHandle,
@@ -562,7 +536,7 @@ export class OverlayController {
 
   private hitChain(p: Point): SnapshotDto[] {
     const out: SnapshotDto[] = [];
-    for (const w of this.overlay?.windows ?? []) {
+    for (const w of this.boot.windows) {
       const r = this.localRect(w);
       if (r && p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) out.push(w);
     }
@@ -913,13 +887,6 @@ export class OverlayController {
     }
 
     // 新框选：picking，或在已有选区外/工具未激活时重新起框
-    if (this.isEditor) {
-      // 重编辑里选区就是整幅图，不存在"重新框一遍"；空白处点击只取消图形选中，
-      // 否则会把已有标注当成一次新框选给清空
-      this.store.set({ selectedId: null });
-      this.mark();
-      return;
-    }
     this.anchor = { mode: "draw", start: p, moved: false, spaceFromRect: null };
     this.store.set({
       phase: "drawing",
@@ -1205,7 +1172,6 @@ export class OverlayController {
     // 4) R：恢复上次选区（与 Snipaste 的 R 语义一致；矩形工具在 V）
     if (lower === "r") {
       e.preventDefault();
-      if (this.isEditor) return; // 重编辑里选区就是整幅图，没有"上次选区"可言
       if (!this.restoreLastRect()) this.store.set({ error: "没有可恢复的上次选区" });
       return;
     }
@@ -1321,7 +1287,7 @@ export class OverlayController {
 
   /** R：恢复上一次成功截图的选区（宿主记录，随 bootstrap 下发） */
   private restoreLastRect(): boolean {
-    const last = this.overlay?.lastRect;
+    const last = this.boot.lastRect;
     if (!last) return false;
     const b = this.boot.bounds;
     const x0 = Math.max(last.x, b.x);
@@ -1888,11 +1854,9 @@ export class OverlayController {
   private async ensureSel(): Promise<number | null> {
     const sel = this.state.sel;
     if (!sel || sel.w < 1 || sel.h < 1) return null;
-    // 重编辑：sel 在 loadFrame 时就定了，不再裁剪会话帧
-    if (this.isEditor) return this.committedSelId;
     if (this.committedSelId !== null && rectEq(this.committedRect, sel)) return this.committedSelId;
     const r = await invoke<{ sel: number }>("commit_selection", {
-      token: this.overlay!.token,
+      token: this.boot.token,
       rect: this.virtualRect(sel),
       source: "region",
       appHint: null,
@@ -1942,7 +1906,7 @@ export class OverlayController {
   private async cleanWindowCopy(w: SnapshotDto): Promise<void> {
     try {
       const r = await invoke<{ sel: number }>("capture_window_clean", {
-        token: this.overlay!.token,
+        token: this.boot.token,
         windowId: w.windowId,
       });
       await invoke("export_result", { req: { sel: r.sel, op: "copy" } });
@@ -1977,7 +1941,7 @@ export class OverlayController {
 
   async cancel(): Promise<void> {
     try {
-      if (this.overlay) await invoke("cancel_capture", { token: this.overlay.token });
+      await invoke("cancel_capture", { token: this.boot.token });
     } catch {
       /* 会话可能已被宿主关掉 */
     }

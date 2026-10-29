@@ -1,10 +1,10 @@
-// 历史：缩略图为主，动作图标悬停浮出；双击条目进重编辑器（导出另存为新条目）。
+// 历史：缩略图为主，动作图标悬停浮出。
 // 多选：单击卡片/左上角勾选切换，Shift+单击选一段；顶部「删除选中」两步确认后批量删。
 
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { invoke } from "../shared/ipc";
 import type { HistoryRow } from "../shared/types";
-import { IconCheck, IconCopy, IconEdit, IconFolder, IconPin, IconTrash } from "../shared/icons";
+import { IconCheck, IconCopy, IconFolder, IconPin, IconTrash } from "../shared/icons";
 
 export default function HistoryPage() {
   const [rows, setRows] = useState<HistoryRow[] | null>(null);
@@ -88,7 +88,7 @@ export default function HistoryPage() {
     setNotice("");
   }
 
-  /** 卡片上的动作按钮：阻止冒泡，否则会被卡片的「单击选中 / 双击重编辑」吞掉 */
+  /** 卡片上的动作按钮：阻止冒泡，否则会被卡片的「单击选中」吞掉 */
   const onAct = (fn: () => Promise<unknown>) => (e: ReactMouseEvent) => {
     e.stopPropagation();
     setNotice("");
@@ -144,7 +144,7 @@ export default function HistoryPage() {
       <header>
         <h1>历史</h1>
         <span className="hint-inline">
-          {rows.length} 张 · 单击选择、双击重新编辑
+          {rows.length} 张 · 单击选择
         </span>
         {rows.length > 0 && (
           <button onClick={pickAll}>{allPicked ? "取消全选" : "全选"}</button>
@@ -195,7 +195,6 @@ export default function HistoryPage() {
                     togglePick(r.id);
                   }
                 }}
-                onDoubleClick={() => void run(() => invoke("history_edit", { id: r.id }))}
               >
                 <div className="thumb">
                   <img src={`data:image/jpeg;base64,${r.thumb_base64}`} alt="" />
@@ -203,13 +202,6 @@ export default function HistoryPage() {
                     {isPicked && <IconCheck size={14} />}
                   </span>
                   <div className="card-acts">
-                    <button
-                      data-tip="重新编辑"
-                      aria-label="重新编辑"
-                      onClick={onAct(() => invoke("history_edit", { id: r.id }))}
-                    >
-                      <IconEdit />
-                    </button>
                     <button
                       data-tip="复制到剪贴板"
                       aria-label="复制到剪贴板"

@@ -1,4 +1,4 @@
-// overlay 与 editor 共用的浮层定位：每帧由页面的 rAF 调用，直接写 DOM 样式，
+// overlay 的浮层定位：每帧由页面的 rAF 调用，直接写 DOM 样式，
 // 绕开 React reconciliation —— 跟随光标的元素若走 setState，pointermove 就成了渲染风暴。
 
 import { useSyncExternalStore } from "react";

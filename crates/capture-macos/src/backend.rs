@@ -91,9 +91,9 @@ impl CaptureBackend for MacOsBackend {
 
     fn permission_status(&self) -> PermissionStatus {
         PermissionStatus {
-            screen_recording: cg::screen_capture_allowed(),
+            screen_recording: Some(cg::screen_capture_allowed()),
             // 仅展示：global-shortcut 走 Carbon，不依赖 AX（与参考行为差异已在 README 记录）
-            accessibility: unsafe { AXIsProcessTrusted() },
+            accessibility: Some(unsafe { AXIsProcessTrusted() }),
         }
     }
 

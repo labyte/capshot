@@ -59,7 +59,7 @@ jobs:
         shell: bash
         run: |
           npm run build
-          for p in index overlay pin settings history editor; do
+          for p in index overlay pin settings history about; do
             [ -f "dist/$p.html" ] || { echo "::error::dist/$p.html 未产出（vite.config.js 的 rollupOptions.input 漏页）"; exit 1; }
           done
       - name: Unit tests

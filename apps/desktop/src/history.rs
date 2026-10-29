@@ -35,7 +35,8 @@ impl HistoryStore {
                source TEXT NOT NULL, app_hint TEXT, annotation_json TEXT);
              CREATE INDEX IF NOT EXISTS idx_created ON captures(created_at DESC);",
         )?;
-        // 老库补列：src_rel 存「未烘标注的原始底图」，重编辑要靠它才不会把标注画两遍。
+        // 老库补列：src_rel 存「未烘标注的原始底图」（原本是「重新编辑」的原料，功能已移除，
+        // 列与写入侧都保留，删除条目时还要靠它清掉 .src.png）。
         // 重复执行必然报 duplicate column，忽略即可（SQLite 没有 ADD COLUMN IF NOT EXISTS）。
         let _ = conn.execute("ALTER TABLE captures ADD COLUMN src_rel TEXT", []);
         Ok(Self { conn, root })
@@ -43,7 +44,8 @@ impl HistoryStore {
 
     /// `png` = 烘好标注的成品图（缩略图/复制/贴图都读它）；
     /// `base_png` = 同一张截图的**未标注底图**，只在有标注时另存一份 `.src.png`。
-    /// 重编辑必须从底图 + annotation_json 重新叠图形，否则标注会被画第二遍。
+    /// 底图 + annotation_json 是「重新编辑」的原料（从底图重叠图形才不会把标注画两遍）；
+    /// 该功能已移除，这里照旧写，数据留给将来重做时用。
     pub fn insert(
         &self,
         png: &[u8],
@@ -83,18 +85,19 @@ impl HistoryStore {
         );
         let png_rel = format!("history/{y}/{d}/{name}.png");
         let thumb_rel = format!("thumbnails/{name}.jpg");
-        let png_path = self.root.join(&png_rel);
-        let thumb_path = self.root.join(&thumb_rel);
+        // 写入侧也走 abs()，让「这次写的路径」与「以后读回的路径」是同一个字符串
+        let png_path = self.abs(&png_rel);
+        let thumb_path = self.abs(&thumb_rel);
         std::fs::create_dir_all(png_path.parent().unwrap()).map_err(|e| e.to_string())?;
         std::fs::create_dir_all(thumb_path.parent().unwrap()).map_err(|e| e.to_string())?;
         std::fs::write(&png_path, png).map_err(|e| e.to_string())?;
         // 底图与成品图字节相同 = 这张没有标注，不必多存一份。
-        // 写失败也不能连累入库：降级成「没有独立底图」，重编辑按平面图处理（见 src_path）。
+        // 写失败也不能连累入库：降级成「没有独立底图」（见 src_path）。
         let src_rel = if base_png.is_empty() || base_png == png {
             None
         } else {
             let rel = format!("history/{y}/{d}/{name}.src.png");
-            let path = self.root.join(&rel);
+            let path = self.abs(&rel);
             match std::fs::write(&path, base_png) {
                 Ok(()) => Some(rel),
                 Err(e) => {
@@ -141,7 +144,7 @@ impl HistoryStore {
                 let thumb_rel: Option<String> = r.get(7)?;
                 let thumb = thumb_rel
                     .as_ref()
-                    .map(|p| std::fs::read(self.root.join(p)).unwrap_or_default())
+                    .map(|p| std::fs::read(self.abs(p)).unwrap_or_default())
                     .unwrap_or_default();
                 Ok(HistoryRow {
                     id,
@@ -165,23 +168,35 @@ impl HistoryStore {
         &self.root
     }
 
+    /// DB 存的相对键恒用 `/`（`history/2026/20261028/x.png`）。直接 `root.join(rel)` 在
+    /// Windows 上拼出来的是**混合分隔符**路径：文件 API 认（所以缩略图/复制/删除一直正常），
+    /// 但 `explorer.exe` 的命令行解析不认 —— 实测 `/select,C:\...\history/2026/x.png`
+    /// 会直接开桌面。按分隔符拆段逐段 push，出来的就是本地分隔符的干净路径。
+    fn abs(&self, rel: &str) -> std::path::PathBuf {
+        let mut p = self.root.clone();
+        for part in rel.split(['/', '\\']).filter(|s| !s.is_empty()) {
+            p.push(part);
+        }
+        p
+    }
+
     pub fn png_path(&self, id: i64) -> Option<std::path::PathBuf> {
         let rel: String = self
             .conn
             .query_row("SELECT png_rel FROM captures WHERE id=?1", params![id], |r| r.get(0))
             .ok()?;
-        Some(self.root.join(rel))
+        Some(self.abs(&rel))
     }
 
-    /// 重编辑用的**未烘标注底图**。老条目没有这一列（或底图文件已丢）就返回 None，
-    /// 调用方按「成品图即底图」处理 —— 那种图上标注已经烘死在像素里，不能再叠一遍图形。
+    /// **未烘标注底图**（原本是「重新编辑」重画图形的原料；该功能已移除）。
+    /// 老条目没有这一列（或底图文件已丢）就返回 None。delete() 靠它把 .src.png 一并清掉。
     pub fn src_path(&self, id: i64) -> Option<std::path::PathBuf> {
         let rel: Option<String> = self
             .conn
             .query_row("SELECT src_rel FROM captures WHERE id=?1", params![id], |r| r.get(0))
             .ok()
             .flatten();
-        let path = self.root.join(rel?);
+        let path = self.abs(&rel?);
         path.is_file().then_some(path)
     }
 
@@ -207,7 +222,7 @@ impl HistoryStore {
             .ok()
             .flatten();
         if let Some(t) = rel {
-            let _ = std::fs::remove_file(self.root.join(t));
+            let _ = std::fs::remove_file(self.abs(&t));
         }
         self.conn
             .execute("DELETE FROM captures WHERE id=?1", params![id])
@@ -221,8 +236,12 @@ impl HistoryStore {
         ids.iter().filter(|id| self.delete(**id)).count()
     }
 
-    /// 重编辑器读回标注 JSON。之前只有写入侧（set_annotation）且从未被调用，
-    /// 所以整条「重新编辑」链路缺的就是这一环。
+    /// 读回某条历史的标注 JSON。
+    ///
+    /// 「重新编辑」功能已移除（编辑窗打开是空白，见 docs/testing-windows.md），
+    /// 所以当前没有调用方；写入侧（insert 的 annotation 参数）仍保留，
+    /// 重做重编辑时不必回头补数据。
+    #[allow(dead_code)]
     pub fn annotation_of(&self, id: i64) -> Option<String> {
         self.conn
             .query_row("SELECT annotation_json FROM captures WHERE id=?1", params![id], |r| r.get(0))
@@ -230,8 +249,7 @@ impl HistoryStore {
             .flatten()
     }
 
-    /// 就地更新某条历史的标注。当前导出策略是「重编辑另存为新条目」（已确认的决定），
-    /// 所以这条路暂时没人调用；留着是给未来"覆盖原条目"模式的。
+    /// 就地更新某条历史的标注。没有调用方（「重新编辑」已移除），留着是给未来"覆盖原条目"模式的。
     #[allow(dead_code)]
     pub fn set_annotation(&self, id: i64, json: &str) {
         let _ = self.conn.execute(
@@ -322,7 +340,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// 有标注的条目要另存一份未烘标注的底图（重编辑从它重画图形）；
+    /// 有标注的条目要另存一份未烘标注的底图；
     /// 没标注的条目不能再存第二份；批量删除把成品图/底图/缩略图/DB 行一并清掉。
     #[test]
     fn base_png_split_and_batch_delete() {
@@ -349,6 +367,31 @@ mod tests {
         assert_eq!(store.delete_many(&[marked, plain, 999]), 2);
         assert!(!src.exists(), "批量删除要连底图一起删");
         assert!(store.list(10, 0).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// DB 里的相对键恒用 `/`，拼出来的必须是**本地分隔符**路径。
+    /// 混合分隔符平时看不出来（`fs::read`/`remove_file` 都认），但 `explorer.exe` 的
+    /// `/select` 不认 —— 实测会直接开桌面，就是「点了没定位到目录」。
+    #[test]
+    fn rel_keys_become_native_paths() {
+        let root = std::env::temp_dir().join(format!("capshot-native-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let store = HistoryStore::open(root.clone()).unwrap();
+        let id = store
+            .insert(b"png", b"png", b"thumb", &PhysicalRect::new(0, 0, 4, 4), "capture", None, None, 1, "capshot")
+            .unwrap();
+
+        let p = store.png_path(id).unwrap();
+        assert!(p.starts_with(&root), "必须挂在历史根目录下：{}", p.display());
+        assert_eq!(std::fs::read(&p).unwrap(), b"png", "换算后仍要指到真正那张文件");
+        #[cfg(windows)]
+        assert!(!p.to_string_lossy().contains('/'), "不该留正斜杠：{}", p.display());
+
+        // 缩略图与删除走的是同一套换算，这里确认 list 读得到字节、删除清得掉文件
+        assert!(!store.list(10, 0)[0].thumb_base64.is_empty(), "缩略图路径也得换算");
+        assert!(store.delete(id));
+        assert!(!p.exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 }

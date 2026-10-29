@@ -3,7 +3,7 @@
 //! 其余命令全部 no-op。用于在真实浏览器（=同 WebView2 内核）里单测交互链路，
 //! 以及无头 CDP 自动化验收。生产构建 import.meta.env.DEV 为 false，不会带入。
 
-import type { BootOverlay, SnapshotDto } from "./types";
+import type { BootOverlay, HotkeySlot, SettingsDto, SnapshotDto } from "./types";
 
 const w = window as unknown as Record<string, any>;
 
@@ -99,4 +99,94 @@ export function installMock() {
       },
     };
   }
+}
+
+/**
+ * 设置页的浏览器替身（`settings.html?mock`，仅 vite dev）。
+ *
+ * 设置页全是纯读 + 一次 set_settings，给一份可变对象就能把「改了立刻回显」的链路跑通，
+ * 不用起 cargo 就能核对分页布局、键位框录制和行末状态图标。
+ * 默认让 F1「被别的程序占了」，这样红叉和绿勾能同屏出现，不用真去抢注系统热键。
+ * 改键撞上同一把占用的键时，替身照宿主的语义回滚旧键，并把被拒的那把记进 failedKey，
+ * 于是「框里还是旧键 + 行下一句红字」这条分支也看得见。
+ */
+export function installSettingsMock() {
+  if (w.__TAURI_INTERNALS__) return;
+  const s: SettingsDto = {
+    hotkey: "F1",
+    hotkeyPin: "F3",
+    hotkeyHidePins: "Shift+F3",
+    hotkeyThrough: "",
+    quality: 0.86,
+    flashMs: 250,
+    autostart: false,
+    saveOnCopy: false,
+    saveDir: "E:\\01-work\\hr\\截图存档\\CapsShot-2026",
+  };
+  const DEFAULTS: Record<HotkeySlot, string> = {
+    hotkey: "F1",
+    hotkeyPin: "F3",
+    hotkeyHidePins: "Shift+F3",
+    hotkeyThrough: "",
+  };
+  const taken = new Set(["F1"]);
+  const rejected = new Map<HotkeySlot, string>();
+  const slots: HotkeySlot[] = ["hotkey", "hotkeyPin", "hotkeyHidePins", "hotkeyThrough"];
+  w.__TAURI_INTERNALS__ = {
+    metadata: { currentWindow: { label: "settings-mock" }, windowCapabilities: {} },
+    transformCallback: (cb: unknown) => cb,
+    unregisterCallback: () => {},
+    convertFileSrc: (p: string) => p,
+    async invoke(cmd: string, args?: Record<string, unknown>) {
+      switch (cmd) {
+        case "get_settings":
+          return s;
+        case "default_hotkeys":
+          return { ...DEFAULTS };
+        case "permission_status":
+          // 给一份 macOS 形态的状态：权限那一组行是 Windows 上看不到的布局
+          return { screenRecording: true, accessibility: false };
+        case "hotkey_status":
+          return {
+            slots: slots
+              .filter((slot) => s[slot].trim() !== "")
+              .map((slot) => {
+                // 撞占用、或上一次改键被拒（配置里仍是能用的旧键）→ 这一槽算没生效
+                const why = rejected.get(slot) ?? (taken.has(s[slot]) ? s[slot] : null);
+                return {
+                  slot,
+                  key: s[slot],
+                  ok: !why,
+                  failedKey: why ?? null,
+                  label: why ? "已被其它程序占用" : null,
+                  detail: why ? "注册失败：HotKey already registered" : null,
+                };
+              }),
+          };
+        case "set_settings": {
+          const p = (args?.patch ?? {}) as Partial<SettingsDto>;
+          for (const slot of slots) {
+            const next = p[slot];
+            if (next === undefined) continue;
+            if (taken.has(next) && next !== s[slot]) {
+              rejected.set(slot, next); // 被拒：配置保持旧键，但把新键名留给状态查询
+              continue;
+            }
+            rejected.delete(slot);
+            s[slot] = next;
+          }
+          for (const k of ["quality", "flashMs", "autostart", "saveOnCopy", "saveDir"] as const) {
+            if (p[k] !== undefined) (s as unknown as Record<string, unknown>)[k] = p[k];
+          }
+          console.log("[mock] set_settings", JSON.stringify(p));
+          return { settings: s };
+        }
+        case "pick_save_dir":
+          return "C:\\Users\\ASUS\\Pictures\\CapsShot";
+        default:
+          console.log("[mock] stubbed:", cmd);
+          return null;
+      }
+    },
+  };
 }

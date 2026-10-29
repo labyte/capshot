@@ -91,7 +91,7 @@ Tauri v2 截图工具（对齐 Snipaste 交互），Rust workspace + Vite/React 
   版本号也别再硬写，脚本现在从 `apps/desktop/tauri.conf.json` 里 sed 出来。
 - **前端必须先于 cargo 构建**：custom-protocol 是编译期把 `ui/dist` 打进二进制，
   改了 UI 代码要先 `npm run build`（在 `ui/`）再编 cargo。
-- 发布前检查：`cargo test --workspace`（11 项内核测试）+ `npm run typecheck` 都要绿。
+- 发布前检查：`cargo test --workspace`（12 项内核测试）+ `npm run typecheck` 都要绿。
 
 ## 常用命令
 
@@ -110,6 +110,8 @@ cargo test --workspace
 - 单实例：重复启动静默退出；先 `taskkill //IM capshot.exe //F`。
 - 浏览器调试截图层：vite 跑着时开 `http://localhost:1420/overlay.html?mock`
   （合成帧，交互链路完整可跑，生产构建自动剔除）。
+- 浏览器调试设置页：`http://localhost:1420/settings.html?mock`（同一套 devmock，
+  替身里 F1 默认「被占用」，所以红叉/绿勾/改键被拒三种状态都不用起 cargo 就能看）。
 
 ### tauri CLI 的接法（为什么必须从根目录跑）
 

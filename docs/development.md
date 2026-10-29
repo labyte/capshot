@@ -15,7 +15,7 @@ too-small 回退、0.86 JPEG、权限 preflight、requestId 幂等）移植为�
 
 | 里程碑 | 状态 | 验证方式 |
 |---|---|---|
-| M1 capture-core（types/trait/plan/coord/encode/filename） | ✅ 完成 | `cargo test --workspace` 11/11 绿（fixture 复刻参考判定案例） |
+| M1 capture-core（types/trait/plan/coord/encode/filename） | ✅ 完成 | `cargo test --workspace` 12/12 绿（fixture 复刻参考判定案例） |
 | M2 capture-macos 后端 + probe | ✅ 完成 | `probe target` 与已验证的参考实现（同逻辑的 Swift 原型）对照：同窗口、`via=window`、物理坐标一致；CGWindowListCreateImage 经 core-graphics 声明链接 |
 | M3 capture-windows 代码（EnumWindows/DWM/WGC/BitBlt/PrintWindow + probe） | ✅ 编译完成 | `cargo check --target x86_64-pc-windows-msvc --examples` 0 error 0 warning；**真实抓取需 Windows 机器验收（M3 矩阵）** |
 | M0 脚手架（workspace+tauri v2+静态多页 UI） | ✅ 完成 | 双目标 `cargo check`；启动冒烟 3s 无 panic |
@@ -23,7 +23,7 @@ too-small 回退、0.86 JPEG、权限 preflight、requestId 幂等）移植为�
 | M5 overlay 冻结帧框选（吸附/放大镜/跨屏提交） | ✅ 代码完成 | 同上 |
 | M6 标注（矩形/箭头/文字/马赛克/撤销，前端渲染导出） | ✅ 基础版 | 同上 |
 | M7 钉图（滚轮缩放锚定/透明度/拖动/双击关） | ✅ 完成 | M11 已补齐穿透开关与右键菜单 |
-| M8 历史（SQLite+PNG+缩略图，复制/钉图/目录/删除/重编辑） | ✅ 完成 | editor 窗复用 overlay 引擎（`isEditor` 分支），导出另存为新条目 |
+| M8 历史（SQLite+PNG+缩略图，复制/钉图/目录/删除） | ✅ 完成 | 「重新编辑」已移除（编辑窗打开是空白）；底图 `.src.png` 与 `annotation_json` 仍照写，留给将来重做 |
 | M9 打包 | ✅ 完成 | tag `v*` → Release 四附件（见下「CI 与发布」） |
 | M11 交互层 Snipaste 化（React+Vite / 截图层 / 标注 / 贴图 / F1·F3） | ✅ 代码完成 | `cargo test --workspace` 11/11 仍绿（抓取内核零改动）；**手感待实机验收** |
 
@@ -35,7 +35,7 @@ crates/capture-macos    # CGWindowList* + 权限 + point↔physical 换算 + exa
 crates/capture-windows  # EnumWindows/Dwm/WGC/BitBlt/PrintWindow + examples/probe（cfg 门控）
 apps/desktop            # Tauri v2 壳层：托盘/全局热键/单实例/窗口/命令（非标准布局，不是 src-tauri/）
 ui/                     # Vite 多页 + React：六页各自入口，加页面要同时改 vite.config.js 的 input
-ui/src/annotate/        # 图形模型/绘制/命中/撤销栈/annotationJson v2（overlay、editor、贴图共用）
+ui/src/annotate/        # 图形模型/绘制/命中/撤销栈/annotationJson v2 写出（overlay 与贴图共用）
 ui/src/overlay/engine/  # 截图层命令式引擎：状态机 + rAF 画布 + 像素读取（React 只管浮层 chrome）
 ui/src/shared/theme.css # 单一样式表 + 视觉 token（按 body class 分透明/不透明作用域）
 ```
@@ -84,10 +84,29 @@ cargo run -p desktop --features custom-protocol
 - Windows 上 `tauri-build` 需要 `rc.exe`（编图标资源），`apps/desktop/build.rs` 的 `ensure_rc()`
   会自动定位，无需手设。
 - macOS debug 二进制首次截图会触发屏幕录制授权弹窗（TCC 按二进制路径记录，重新构建后可能需要重勾）。
+- `PermissionStatus` 的两个字段是 `Option<bool>`：`None` = **本平台没有这个权限概念**（Windows 无 TCC）。
+  设置页在 `screenRecording === null` 时**整块「权限」都不渲染**（Windows 上根本看不到这一节），
+  因为「未授权」是误导、「不适用」是一行没人要的噪音、那两个按钮是空操作。
+  别改回硬编码 `true/false` —— 那会让人以为查过、或跑去系统设置里白找。结构体上的
+  `#[serde(rename_all = "camelCase")]` 是**契约**：前端读 `screenRecording`，缺它就一直显示「未授权」
+  （踩过，`capture-core/tests/core.rs` 的 `permission_status_wire_shape_is_camel_case_with_null` 钉住）。
+- 快捷键行末的勾/叉（参照 Snipaste）取自 `hotkey_status`，而它的**唯一事实来源是 `state.bindings`**
+  （`rebind_all` 只把注册成功的塞进去，改键被拒时留在表里的仍是那把能用的旧键）。前端只拿得到
+  配置里的键名，判不出「到底注册上没有」，所以结论必须在宿主算，别把它挪回 TS 里重算一遍。
+  一次返回**所有已绑定的槽**（未绑定的槽不在里面 → 不画图标），绿勾与红叉因此出自同一份数据。
+  短原因措辞只在 `HotkeyFailureKind::label()` 有一份；内部错误串只进 hover 的 `title`。
 - 加新页面要同时改两处：`ui/<页>.html` **+** `ui/vite.config.js` 的 `rollupOptions.input`。
   只加 html 不加 input，prod 构建会**静默不产出该页**，表现为该窗口白屏（CI 有逐页存在性检查兜住）。
 - 浏览器调试截图层：vite 跑着时开 `http://localhost:1420/overlay.html?mock`
   （合成帧，交互链路完整可跑，生产构建自动剔除）。
+- 浏览器调试设置页：`http://localhost:1420/settings.html?mock`（同一份 `shared/devmock.ts`）。
+  替身里 F1 默认「被别的程序占用」，所以绿勾、红叉、改键被拒那句话都不用起 cargo 就能看见。
+- 设置页是**分页 + 两列对齐**（标签列右对齐带冒号，快捷键页多一列 18px 给行末勾/叉）。
+  跨列的那一行（长说明、按钮行）必须写 `width: 0; min-width: 100%`：网格算 `max-content`
+  时会把跨列项的固有宽度灌进被跨的每一列，一句长提示就能把标签列撑到 325px、控件列压到 106px
+  （实测踩到，浏览器里 `getComputedStyle(form).gridTemplateColumns` 一眼可见）。
+  同理：**每一行的格子数要和列数对上**，控件行前面那个空的 `<span class="k">` 不是装饰，
+  少一个就会把下一个标签挤到本行第三列去。
 
 ## CI 与发布
 

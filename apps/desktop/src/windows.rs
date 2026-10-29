@@ -127,42 +127,6 @@ fn build_pin(app: &AppHandle, sel: u64, img_w: u32, img_h: u32) -> tauri::Result
     Ok(win)
 }
 
-/// 重编辑器窗：带标题栏的正常窗，尺寸按图像物理像素折算到逻辑像素并不超过主屏 90%。
-pub fn open_editor(app: &AppHandle, sel: u64, img_w: u32, img_h: u32) -> tauri::Result<String> {
-    let label = format!("editor-{sel}");
-    if let Some(existing) = app.get_webview_window(&label) {
-        let _ = existing.unminimize();
-        let _ = existing.show();
-        let _ = existing.set_focus();
-        return Ok(label);
-    }
-    let win = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("editor.html".into()))
-        .title("CapsShot 重新编辑")
-        .inner_size(320.0, 240.0)
-        .resizable(true)
-        .build()?;
-    // 尺寸一律走物理像素（和 overlay 同一套做法），避免在此处再猜一次 DPI 缩放；
-    // 上限取主屏的 90%，保证 4K 全屏截图也能整块放下且留得下工具条
-    let (mut w, mut h) = (img_w, img_h);
-    if let Some(m) = app.primary_monitor().ok().flatten() {
-        let ms = m.size();
-        let max_w = (ms.width as u64 * 9 / 10) as u32;
-        let max_h = (ms.height as u64 * 9 / 10) as u32;
-        if w > max_w {
-            h = ((h as u64 * max_w as u64) / w as u64).max(1) as u32;
-            w = max_w;
-        }
-        if h > max_h {
-            w = ((w as u64 * max_h as u64) / h as u64).max(1) as u32;
-            h = max_h;
-        }
-    }
-    let _ = win.set_size(tauri::Size::Physical(tauri::PhysicalSize { width: w, height: h }));
-    let _ = win.center();
-    let _ = win.set_focus();
-    Ok(label)
-}
-
 pub fn open_simple(app: &AppHandle, label: &str, url: &str, w: f64, h: f64) -> tauri::Result<()> {
     if let Some(existing) = app.get_webview_window(label) {
         let _ = existing.unminimize();

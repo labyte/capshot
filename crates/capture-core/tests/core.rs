@@ -201,3 +201,24 @@ fn filename_render_and_sanitize() {
     let (y, d) = filename::date_dirs(&s);
     assert_eq!((y.as_str(), d.as_str()), ("2026", "20261019"));
 }
+
+/// 锁住权限 DTO 的**线上形状**。这里出过真事故：serde 默认 snake_case（`screen_recording`），
+/// 而 `ui/src/shared/types.ts` 读 `screenRecording` → 取到 undefined → falsy，
+/// 设置页永远显示「未授权」；TS 字段类型是非空 `boolean`，tsc 完全拦不住。
+/// 另一个必须锁的是 `None → null`：前端靠它把「本平台不适用」和「未授权」分开。
+#[test]
+fn permission_status_wire_shape_is_camel_case_with_null() {
+    let na = serde_json::to_value(PermissionStatus::NOT_APPLICABLE).unwrap();
+    assert_eq!(na, serde_json::json!({ "screenRecording": null, "accessibility": null }));
+
+    let mac = serde_json::to_value(PermissionStatus {
+        screen_recording: Some(false),
+        accessibility: Some(true),
+    })
+    .unwrap();
+    assert_eq!(mac, serde_json::json!({ "screenRecording": false, "accessibility": true }));
+
+    // 回读走同一套字段名（probe CLI 与前端 mock 都依赖它）
+    let back: PermissionStatus = serde_json::from_value(mac).unwrap();
+    assert_eq!(back, PermissionStatus { screen_recording: Some(false), accessibility: Some(true) });
+}

@@ -171,13 +171,23 @@ pub enum PermissionKind {
     Accessibility,
 }
 
-/// 对应逆向的 permissionStatus：{screenCapture, accessibility}
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+/// 权限状态。`None` = **这个平台根本没有这项权限概念**（Windows 无 TCC），不是「未授权」。
+/// 前端据此显示「不适用」并收起授权按钮：硬编码 `true` 等于谎称查过，硬编码 `false`
+/// 会把人赶去系统设置里白找一通（本机就是这样：设置页永远显示「未授权」）。
+///
+/// `rename_all = "camelCase"` 是**契约**，别删：`ui/src/shared/types.ts` 读的是
+/// `screenRecording`，serde 默认的 snake_case 会让它取到 undefined，于是 `? :` 恒走
+/// 「未授权」分支 —— 类型是 `boolean` 而非 `boolean | null`，tsc 也拦不住。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PermissionStatus {
-    pub screen_recording: bool,
-    pub accessibility: bool,
+    pub screen_recording: Option<bool>,
+    pub accessibility: Option<bool>,
 }
 
 impl PermissionStatus {
-    pub const NONE: Self = Self { screen_recording: false, accessibility: false };
+    /// 本平台不检测权限（Windows）
+    pub const NOT_APPLICABLE: Self = Self { screen_recording: None, accessibility: None };
+    /// macOS 上两项都没拿到
+    pub const NONE: Self = Self { screen_recording: Some(false), accessibility: Some(false) };
 }
