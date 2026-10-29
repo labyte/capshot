@@ -50,6 +50,11 @@ Tauri v2 截图工具（对齐 Snipaste 交互），Rust workspace + Vite/React 
   不会自动清空，版本号不变时旧包留着，`0.1.20` 会排在 `0.1.21` 前面（本地实测踩到）。
 - 打包前先跑「一眼判别法」自检（`Verify binary embeds UI`）：没内嵌前端就直接失败，
   别把开出来是错误网页的壳发出去。放在 `tauri build` 之后 = 检的是真要发的那个。
+  三个调用点（ci.yml 两平台、release.yml 的 win 与 mac）都调 **`scripts/verify-embed.sh <二进制>`**，
+  判据只有这一份。**探针名一律取自 `ui/dist/assets/` 的真实 chunk 名，别在 workflow 里写死**：
+  v0.4.0 首次发布就是挂在这——原来写死 `TextInput-*.js`，而移除 editor 页之后 TextInput
+  不再是独立 chunk，正则永远匹配不上，mac 与 win 两个 job 一起假失败。
+  也别改用 `*.html` 名当探针（实测 dev 版二进制里 `index.html` / `settings.html` 全都在，判不出来）。
 
 ## 构建硬性约束（本地与 CI 一致）
 
@@ -135,20 +140,21 @@ cargo test --workspace
 `tauri dev` 编的是**不带 `custom-protocol`** 的 debug 二进制，运行时连 `http://localhost:1420`，
 所以 vite 必须在（CLI 的 `beforeDevCommand` 会自己起，端口被占就报 `Port 1420 is already in use`——
 多半是上次遗留的 vite 没退干净）。**发布主链路走 `tauri build --bundles`**（v0.1.21 起）：exe 与安装包（NSIS/DMG）出自同一次
-构建（release 下 `custom-protocol` 默认开，build-windows 的 Package 步骤用下面这条一眼判别法
-做自检，缺失即失败）；zip 免安装包仍手工 `Compress-Archive` / `zip` 组装。
+构建（release 下 `custom-protocol` 默认开，build-windows 有一步独立的 `Verify binary embeds UI`
+调 `scripts/verify-embed.sh` 做自检，缺失即失败）；zip 免安装包仍手工 `Compress-Archive` / `zip` 组装。
 别再改回裸 `cargo build` 出 exe——那会丢掉安装包，且 custom-protocol 漏开时没人兜底。
 
 > **⚠ `tauri dev` 会覆盖 `target/debug/capshot.exe`**（真踩过）：它写进去的是**没有内嵌前端**的
 > dev 版，只认 `localhost:1420`。所以跑完 `tauri dev` 之后再直接起这个 exe，**没有 vite 就是一张
 > 错误网页**。回到"独立可跑的 debug 版"要重编一次：
 > `cargo build -p desktop --features custom-protocol`。
-> 一眼判别法：`grep -a -o 'TextInput-[A-Za-z0-9_-]*\.js' target/debug/capshot.exe`
-> 有输出 = 内嵌版（独立可跑）；**空 = dev 版（必须配 vite）**。
-> **在 macOS 上必须加 `LC_ALL=C`**：BSD grep 在 UTF-8 locale 下啃几十 MB 无换行的
-> Mach-O 会**静默失配**（实测：同一份 UI 产物，windows-latest 的 GNU grep 命中、
-> macos-14 不命中；把 v0.1.20 的 mac 二进制拉下来按字节搜，`TextInput-DHGYpKV_.js`
-> 命中 1 次，说明东西在、是 grep 的姿势不对）。C locale 按单字节处理，两边行为一致。
+> 一眼判别法（本地与 CI 同一条）：`bash scripts/verify-embed.sh target/debug/capshot.exe`
+> —— 通过 = 内嵌版（独立可跑）；报「漏 …」= dev 版（必须配 vite）。
+> 脚本按 `ui/dist/assets/` 里的真实 chunk 名逐个查，所以**先 `cd ui && npm run build` 再判**，
+> 拿旧 dist 去对新二进制会全线误报。
+> **在 macOS 上必须加 `LC_ALL=C`**（脚本里已经带上）：BSD grep 在 UTF-8 locale 下啃几十 MB
+> 无换行的 Mach-O 会**静默失配**（实测：同一份 UI 产物，windows-latest 的 GNU grep 命中、
+> macos-14 不命中）。C locale 按单字节处理，两边行为一致。
 
 ## 推送 GitHub 走 VPN 代理
 

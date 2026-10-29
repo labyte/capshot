@@ -556,7 +556,9 @@ Windows 仍要 `RC` 指向 SDK 的 `x64/rc.exe`）见 CLAUDE.md「tauri CLI 的�
 > **`tauri dev` 会覆盖 `target/debug/capshot.exe`**：写进去的是**没有内嵌前端**的 dev 版，只认
 > `localhost:1420`。用完它再直接双击这个 exe，vite 不在就是**一张错误网页**（本轮真踩过）。
 > 恢复：`cargo build -p desktop --features custom-protocol`。
-> 判别：`grep -a -o 'TextInput-[A-Za-z0-9_-]*\.js' target/debug/capshot.exe` 有输出=内嵌版，空=dev 版。
+> 判别：`bash scripts/verify-embed.sh target/debug/capshot.exe` —— 通过=内嵌版，报「漏 …」=dev 版。
+> 探针名取自 `ui/dist/assets/` 的真实 chunk 名（别在脚本/文档里写死某个 chunk 名，
+> chunk 名会随入口与分包变化），所以判之前先 `cd ui && npm run build`。
 
 ■ 已知边界（欢迎反馈）
   - Win10 无 SetIsBorderRequired → WGC 截图可能带黄框（Win11 正常）
